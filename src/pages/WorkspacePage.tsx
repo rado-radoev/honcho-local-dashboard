@@ -6,6 +6,7 @@ import { formatDateTime } from '../lib/format'
 import { navigate } from '../lib/routing'
 import { Breadcrumbs, CountBadge, ErrorBox, PageHeader, RefreshButton, Spinner, TabBar } from '../components/ui'
 import { WorkspaceChatTab } from './WorkspaceChatTab'
+import { WorkspaceScopesTab } from './WorkspaceScopesTab'
 import { MessageList } from '../components/MessageList'
 import { Dialog, darkButtonClass, dialogInputClass, dialogLabelClass, primaryButtonClass } from '../components/Dialog'
 import type { Message } from '../types'
@@ -21,6 +22,7 @@ type CreateKind = 'peer' | 'session' | null
 const WORKSPACE_TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'chat', label: 'Workspace Chat' },
+  { id: 'scopes', label: 'Scopes' },
 ]
 
 export function WorkspacePage({ workspaceId }: { workspaceId: string }) {
@@ -196,6 +198,7 @@ export function WorkspacePage({ workspaceId }: { workspaceId: string }) {
       <TabBar tabs={WORKSPACE_TABS} activeTab={activeTab} onSelect={setActiveTab} />
 
       {activeTab === 'chat' ? <WorkspaceChatTab workspaceId={workspaceId} /> : null}
+      {activeTab === 'scopes' ? <WorkspaceScopesTab workspaceId={workspaceId} /> : null}
       {activeTab === 'overview' ? (
       <>
       <div className="grid items-start gap-6 lg:grid-cols-[1fr_auto_1fr]">
