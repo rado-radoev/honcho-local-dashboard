@@ -10,13 +10,32 @@ import { GrowthChart } from '../components/charts'
 import { buildGrowthSeries } from '../lib/charts'
 import { CONCLUSION_LEVELS, LEVEL_COLORS, cappedLabel } from '../lib/conclusions'
 import { MAP_HEIGHT, MAP_WIDTH, type DotLayout } from '../lib/memoryGraph'
+import { isStillSearch } from '../lib/orbit'
+import {
+  EMPTY_STABLE_LAYOUT,
+  advanceStableLayout,
+  type StableLayoutState,
+} from '../lib/stableLayout'
 import type { Conclusion, ConclusionLevel } from '../types'
 
 // Memory Map: per-workspace visual browser over the capped conclusions
 // set. Constellation (default) rings conclusion dots around their
 // observed peer; Network aggregates observer→observed edges. Layout is
-// the deterministic lib — no force simulation, no animation loop; the
-// time scrubber only moves when the user drags it or presses Play.
+// the deterministic lib — no force simulation. In Constellation mode
+// the dots gently orbit their peer's hub (see lib/orbit.ts + the
+// canvas rAF loop); the time scrubber only moves when the user drags
+// it or presses Play.
+
+function initialMotionEnabled(): boolean {
+  if (typeof window === 'undefined') return true
+  if (isStillSearch(window.location.search)) return false
+  return !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+function isStillMode(): boolean {
+  if (typeof window === 'undefined') return false
+  return isStillSearch(window.location.search)
+}
 
 export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
   const { api } = useConnection()
@@ -44,9 +63,36 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
   const [hover, setHover] = useState<DotLayout | null>(null)
   const [scrub, setScrub] = useState<number | null>(null)
   const [playing, setPlaying] = useState(false)
+  // Constellation orbit motion: in-memory only (never persisted), ON by
+  // default unless prefers-reduced-motion or still mode (?still=1).
+  const [still] = useState(isStillMode)
+  const [motionOn, setMotionOn] = useState(initialMotionEnabled)
+  const motion = motionOn && !still
   const playRef = useRef<number | null>(null)
 
   const all = useMemo(() => capped.data?.items ?? [], [capped.data])
+
+  // Append-stable dot slots: advanced (purely) whenever the full
+  // dataset changes, so a cache refresh that adds/removes conclusions
+  // never renumbers the dots already on screen. Reset per workspace.
+  // React's adjust-state-during-render pattern: when the dataset or
+  // workspace changes, advance the stable layout before commit, so
+  // the canvas never paints a renumbered frame.
+  const [stable, setStable] = useState<{
+    workspace: string | null
+    dataset: Conclusion[] | null
+    layout: StableLayoutState
+  }>({ workspace: null, dataset: null, layout: EMPTY_STABLE_LAYOUT })
+  if (stable.workspace !== activeWorkspace || stable.dataset !== all) {
+    const base = stable.workspace === activeWorkspace ? stable.layout : EMPTY_STABLE_LAYOUT
+    setStable({
+      workspace: activeWorkspace,
+      dataset: all,
+      layout: advanceStableLayout(base, all),
+    })
+  }
+  const stableSlots =
+    stable.workspace === activeWorkspace ? stable.layout.slots : EMPTY_STABLE_LAYOUT.slots
   const sortedByTime = useMemo(
     () => [...all].sort((a, b) => a.created_at.localeCompare(b.created_at)),
     [all],
@@ -203,6 +249,18 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
             <List className="h-4 w-4" /> List
           </button>
         </div>
+        <button
+          type="button"
+          onClick={() => setMotionOn((current) => !current)}
+          disabled={still}
+          aria-pressed={motion}
+          aria-label={motion ? 'Pause constellation motion' : 'Play constellation motion'}
+          title={still ? 'Motion off in still mode' : 'Toggle constellation motion'}
+          className="flex items-center gap-1 rounded-md border border-line px-2 py-1.5 text-sm text-mist hover:bg-panel disabled:opacity-50"
+        >
+          {motion ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+          Motion
+        </button>
         <div className="ml-auto flex items-center gap-2 text-xs text-fog">
           <button
             type="button"
@@ -252,6 +310,8 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
                 peerIds={visiblePeerIds}
                 selected={selected}
                 search={search}
+                motion={motion}
+                slots={stableSlots}
                 onSelect={setSelected}
                 onHover={setHover}
               />

@@ -1,3 +1,4 @@
+import { useEffect, useRef, type RefObject } from 'react'
 import type { Conclusion } from '../types'
 import { LEVEL_COLORS } from '../lib/conclusions'
 import {
@@ -6,18 +7,137 @@ import {
   layoutConstellation,
   layoutNetwork,
   type DotLayout,
+  type HubLayout,
 } from '../lib/memoryGraph'
+import { orbitBandForDistance, orbitRotationDeg } from '../lib/orbit'
+import type { StableSlot } from '../lib/stableLayout'
 
 // SVG rendering for the Memory Map (no canvas, no animation library).
 // Constellation: peer hubs with gradient-ring strokes + conclusion dots.
-// Network: aggregated directed edges between peer hubs. All coordinates
-// come from the deterministic lib — this component only draws.
+// Network: aggregated directed edges between peer hubs. All base
+// coordinates come from the deterministic lib — this component only draws.
+//
+// Constellation motion: dots are grouped per peer + ring band into <g>
+// elements, and a single rAF loop rotates each group around its hub by
+// writing the transform attribute directly on the DOM node (no React
+// state per frame). A band's dots + their hub tether lines live in the
+// same group, so tethers follow the dots exactly and the hub endpoint
+// (the rotation centre) never moves. At 120 dots that is ~9 transforms
+// per frame (3 peers × ~3 bands); at the 2,000-dot cap ~50 — the dot
+// count never changes the per-frame transform count.
+
+interface OrbitGroup {
+  key: string
+  band: number
+  hub: HubLayout
+  dots: DotLayout[]
+}
+
+function buildOrbitGroups(
+  dots: DotLayout[],
+  hubs: HubLayout[],
+): OrbitGroup[] {
+  const hubByPeer = new Map(hubs.map((hub) => [hub.peerId, hub]))
+  const groups = new Map<string, OrbitGroup>()
+  for (const dot of dots) {
+    const hub = hubByPeer.get(dot.peerId)
+    if (!hub) continue
+    const band = orbitBandForDistance(Math.hypot(dot.x - hub.x, dot.y - hub.y))
+    const key = `${dot.peerId}:${band}`
+    let group = groups.get(key)
+    if (!group) {
+      group = { key, band, hub, dots: [] }
+      groups.set(key, group)
+    }
+    group.dots.push(dot)
+  }
+  return [...groups.values()]
+}
+
+interface GroupHandle {
+  el: SVGGElement
+  band: number
+  hubX: number
+  hubY: number
+}
+
+function clampToMap(value: number, max: number): number {
+  return Math.min(max - 8, Math.max(8, value))
+}
+
+// Apply append-stable slots (lib/stableLayout.ts) over the rank-based
+// layout: a dot with a slot renders at the slot's angle/radius around
+// its hub, not at its current spiral rank, so dataset refreshes never
+// move existing dots. Dots without a slot keep their layout position.
+function applyStableSlots(
+  dots: DotLayout[],
+  hubs: HubLayout[],
+  slots: ReadonlyMap<string, StableSlot> | undefined,
+): DotLayout[] {
+  if (!slots) return dots
+  const hubByPeer = new Map(hubs.map((hub) => [hub.peerId, hub]))
+  return dots.map((dot) => {
+    const slot = slots.get(dot.conclusion.id)
+    if (!slot || slot.peerId !== dot.peerId) return dot
+    const hub = hubByPeer.get(dot.peerId)
+    if (!hub) return dot
+    return {
+      ...dot,
+      x: clampToMap(hub.x + slot.radius * Math.cos(slot.angle), MAP_WIDTH),
+      y: clampToMap(hub.y + slot.radius * Math.sin(slot.angle), MAP_HEIGHT),
+    }
+  })
+}
+
+function ConstellationMotion({
+  motion,
+  groupRefs,
+}: {
+  motion: boolean
+  groupRefs: RefObject<Map<string, GroupHandle>>
+}) {
+  const elapsedRef = useRef(0)
+
+  useEffect(() => {
+    if (!motion) {
+      for (const handle of groupRefs.current.values()) {
+        handle.el.removeAttribute('transform')
+      }
+      return
+    }
+    let frame = 0
+    let last = -1
+    function tick(now: number) {
+      if (last < 0) last = now
+      const delta = now - last
+      last = now
+      // Cap the counted delta per frame: when the tab is hidden rAF
+      // stops entirely, and the first frame back must not jump the
+      // orbit forward by the hidden duration.
+      elapsedRef.current += Math.min(delta, 50)
+      for (const handle of groupRefs.current.values()) {
+        const deg = orbitRotationDeg(elapsedRef.current, handle.band)
+        handle.el.setAttribute(
+          'transform',
+          `rotate(${deg.toFixed(3)} ${handle.hubX} ${handle.hubY})`,
+        )
+      }
+      frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [motion, groupRefs])
+
+  return null
+}
 
 export function ConstellationSvg({
   conclusions,
   peerIds,
   selected,
   search,
+  motion,
+  slots,
   onSelect,
   onHover,
 }: {
@@ -25,13 +145,18 @@ export function ConstellationSvg({
   peerIds: string[]
   selected: Conclusion | null
   search: string
+  motion: boolean
+  slots?: ReadonlyMap<string, StableSlot>
   onSelect: (conclusion: Conclusion) => void
   onHover: (dot: DotLayout | null) => void
 }) {
   const layout = layoutConstellation(conclusions, peerIds, MAP_WIDTH, MAP_HEIGHT)
-  const dotById = new Map(layout.dots.map((dot) => [dot.conclusion.id, dot]))
+  const dots = applyStableSlots(layout.dots, layout.hubs, slots)
+  const dotById = new Map(dots.map((dot) => [dot.conclusion.id, dot]))
   const needle = search.trim().toLowerCase()
   const selectedDot = selected ? dotById.get(selected.id) : undefined
+  const groups = buildOrbitGroups(dots, layout.hubs)
+  const groupRefs = useRef(new Map<string, GroupHandle>())
 
   return (
     <svg
@@ -48,6 +173,12 @@ export function ConstellationSvg({
         </linearGradient>
       </defs>
 
+      <ConstellationMotion motion={motion} groupRefs={groupRefs} />
+
+      {/* Derivation edges stay at base angles (the simpler correct
+          option): they are drawn from the deterministic layout, not
+          from the rotating groups, so a selected dot's orbit does not
+          drag its source chain around. */}
       {selectedDot
         ? selectedDot.conclusion.source_ids.map((sourceId) => {
             const target = dotById.get(sourceId)
@@ -87,33 +218,66 @@ export function ConstellationSvg({
           ))
         : null}
 
-      {layout.dots.map((dot) => {
-        const matches = needle.length === 0 || dot.conclusion.content.toLowerCase().includes(needle)
-        const isSelected = selected?.id === dot.conclusion.id
-        return (
-          <circle
-            key={dot.conclusion.id}
-            data-testid="map-dot"
-            cx={dot.x}
-            cy={dot.y}
-            r={isSelected ? dot.r + 2 : dot.r}
-            fill={dot.color}
-            opacity={matches ? 0.9 : 0.13}
-            stroke={isSelected ? '#FFFFFF' : 'none'}
-            strokeWidth={isSelected ? 1.5 : 0}
-            style={
-              isSelected
-                ? { filter: 'drop-shadow(0 0 6px rgba(183,156,255,0.9))', cursor: 'pointer' }
-                : { cursor: 'pointer' }
+      {groups.map((group) => (
+        <g
+          key={group.key}
+          ref={(el) => {
+            if (el) {
+              groupRefs.current.set(group.key, {
+                el,
+                band: group.band,
+                hubX: group.hub.x,
+                hubY: group.hub.y,
+              })
+            } else {
+              groupRefs.current.delete(group.key)
             }
-            onMouseEnter={() => onHover(dot)}
-            onMouseLeave={() => onHover(null)}
-            onClick={() => onSelect(dot.conclusion)}
-          >
-            <title>{dot.conclusion.content}</title>
-          </circle>
-        )
-      })}
+          }}
+        >
+          {group.dots.map((dot) => (
+            <line
+              key={`tether-${dot.conclusion.id}`}
+              data-testid="map-tether"
+              x1={group.hub.x}
+              y1={group.hub.y}
+              x2={dot.x}
+              y2={dot.y}
+              stroke="#8EA3C7"
+              strokeWidth={0.6}
+              opacity={0.14}
+              pointerEvents="none"
+            />
+          ))}
+          {group.dots.map((dot) => {
+            const matches =
+              needle.length === 0 || dot.conclusion.content.toLowerCase().includes(needle)
+            const isSelected = selected?.id === dot.conclusion.id
+            return (
+              <circle
+                key={dot.conclusion.id}
+                data-testid="map-dot"
+                cx={dot.x}
+                cy={dot.y}
+                r={isSelected ? dot.r + 2 : dot.r}
+                fill={dot.color}
+                opacity={matches ? 0.9 : 0.13}
+                stroke={isSelected ? '#FFFFFF' : 'transparent'}
+                strokeWidth={isSelected ? 1.5 : 7}
+                style={
+                  isSelected
+                    ? { filter: 'drop-shadow(0 0 6px rgba(183,156,255,0.9))', cursor: 'pointer' }
+                    : { cursor: 'pointer' }
+                }
+                onMouseEnter={() => onHover(dot)}
+                onMouseLeave={() => onHover(null)}
+                onClick={() => onSelect(dot.conclusion)}
+              >
+                <title>{dot.conclusion.content}</title>
+              </circle>
+            )
+          })}
+        </g>
+      ))}
 
       {layout.hubs.map((hub) => (
         <g key={hub.peerId}>

@@ -198,7 +198,9 @@ async function main() {
     page.on('pageerror', (error) => pageErrors.push(`${error.message}`))
 
     for (const view of DEMO_VIEWS) {
-      await page.goto(`${ORIGIN}/?demo=1${view.hash}`, { waitUntil: 'networkidle' })
+      // &still=1 forces the Memory Map's constellation motion off (dots
+      // at base angles) so animated views stay byte-stable across runs.
+      await page.goto(`${ORIGIN}/?demo=1&still=1${view.hash}`, { waitUntil: 'networkidle' })
       // Full reload before capturing: hash-only navigation keeps the SPA
       // mounted, and a previous view's screenshot leaves Chromium's
       // compositor in one of two raster states — rounded-corner
