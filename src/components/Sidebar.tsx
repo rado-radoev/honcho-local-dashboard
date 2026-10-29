@@ -8,7 +8,9 @@ import {
   KeyRound,
   Layers,
   LogOut,
+  Network,
   Rocket,
+  ScrollText,
   Server,
   Settings,
   Users,
@@ -36,6 +38,13 @@ const iconClass = 'h-4 w-4 shrink-0'
 const NAV_ITEMS: NavItem[] = [
   { label: 'GET STARTED', icon: <Rocket className={iconClass} />, route: { name: 'get-started' }, cloudOnly: false },
   { label: 'EXPLORE', icon: <Layers className={iconClass} />, route: { name: 'explore' }, cloudOnly: false },
+  { label: 'MEMORY MAP', icon: <Network className={iconClass} />, route: { name: 'memory-map', workspaceId: null }, cloudOnly: false },
+  {
+    label: 'CONCLUSIONS',
+    icon: <ScrollText className={iconClass} />,
+    route: { name: 'conclusions', workspaceId: null, filters: { observer: '', observed: '', level: '', sessionId: '' } },
+    cloudOnly: false,
+  },
   { label: 'INSTANCE STATUS', icon: <Server className={iconClass} />, route: { name: 'status' }, cloudOnly: false },
   { label: 'PERFORMANCE', icon: <BarChart3 className={iconClass} />, route: { name: 'performance' }, cloudOnly: false },
   { label: 'API PLAYGROUND', icon: <Code2 className={iconClass} />, route: { name: 'playground' }, cloudOnly: false },
@@ -47,6 +56,8 @@ const NAV_ITEMS: NavItem[] = [
 
 function isItemActive(item: NavItem, route: Route): boolean {
   if (item.route.name === 'get-started') return route.name === 'get-started'
+  if (item.route.name === 'memory-map') return route.name === 'memory-map'
+  if (item.route.name === 'conclusions') return route.name === 'conclusions'
   if (item.route.name === 'status') return route.name === 'status'
   if (item.route.name === 'performance') return route.name === 'performance'
   if (item.route.name === 'playground') return route.name === 'playground'

@@ -263,3 +263,77 @@ describe('demo fixtures (round 3)', () => {
     expect(result.evidence).not.toBeNull()
   })
 })
+
+import { aggregateEdges, layoutConstellation, layoutNetwork } from '../lib/memoryGraph'
+
+function graphConclusion(id: string, observer: string, observed: string, index: number, level: Conclusion['level'] = 'explicit'): Conclusion {
+  return {
+    id,
+    content: `c ${id}`,
+    observer_id: observer,
+    observed_id: observed,
+    session_id: 's1',
+    level,
+    source_ids: [],
+    source_message_ids: [],
+    times_derived: (index % 6) + 1,
+    created_at: `2026-02-${String((index % 28) + 1).padStart(2, '0')}T00:00:00Z`,
+  }
+}
+
+describe('memoryGraph layout', () => {
+  it('is deterministic: identical input gives identical coordinates', () => {
+    const items = Array.from({ length: 60 }, (_, i) => graphConclusion(`g${i}`, 'hermes', i % 2 ? 'alice' : 'bob', i))
+    const first = layoutConstellation(items, ['bob', 'alice', 'hermes'])
+    const second = layoutConstellation(items, ['hermes', 'alice', 'bob'])
+    expect(second).toEqual(first)
+  })
+
+  it('dedupes by id and keeps coordinates bounded', () => {
+    const items = Array.from({ length: 300 }, (_, i) => graphConclusion(`g${i % 250}`, 'hermes', 'alice', i))
+    const layout = layoutConstellation(items, ['alice', 'hermes'])
+    expect(layout.total).toBe(250)
+    expect(layout.dots).toHaveLength(250)
+    for (const dot of layout.dots) {
+      expect(dot.x).toBeGreaterThanOrEqual(8)
+      expect(dot.x).toBeLessThanOrEqual(760 - 8)
+      expect(dot.y).toBeGreaterThanOrEqual(8)
+      expect(dot.y).toBeLessThanOrEqual(560 - 8)
+      expect(dot.r).toBeGreaterThanOrEqual(3)
+      expect(dot.r).toBeLessThanOrEqual(7)
+    }
+  })
+
+  it('shrinks dots to 2px above 500 conclusions', () => {
+    const items = Array.from({ length: 600 }, (_, i) => graphConclusion(`g${i}`, 'hermes', 'alice', i))
+    const layout = layoutConstellation(items, ['alice', 'hermes'])
+    expect(layout.dots.every((dot) => dot.r === 2)).toBe(true)
+  })
+
+  it('aggregates into density cells above 5,000 conclusions', () => {
+    const items = Array.from({ length: 5001 }, (_, i) =>
+      graphConclusion(`g${i}`, 'hermes', i % 2 ? 'alice' : 'bob', i, i % 3 ? 'explicit' : 'deductive'),
+    )
+    const layout = layoutConstellation(items, ['alice', 'bob', 'hermes'])
+    expect(layout.aggregated).toBe(true)
+    expect(layout.dots).toHaveLength(0)
+    expect(layout.cells).toHaveLength(2)
+    expect(layout.cells.reduce((sum, cell) => sum + cell.count, 0)).toBe(5001)
+  })
+
+  it('aggregates network edges with counts and dominant level', () => {
+    const items = [
+      graphConclusion('a', 'hermes', 'alice', 1, 'explicit'),
+      graphConclusion('b', 'hermes', 'alice', 2, 'explicit'),
+      graphConclusion('c', 'hermes', 'alice', 3, 'deductive'),
+      graphConclusion('d', 'alice', 'hermes', 4, 'inductive'),
+    ]
+    const edges = aggregateEdges(items)
+    expect(edges).toHaveLength(2)
+    expect(edges[0]).toMatchObject({ observer: 'alice', observed: 'hermes', count: 1 })
+    expect(edges[1]).toMatchObject({ observer: 'hermes', observed: 'alice', count: 3, dominantLevel: 'explicit' })
+    const network = layoutNetwork(items, ['alice', 'hermes'])
+    expect(network.edges).toHaveLength(2)
+    expect(network.edges[1].width).toBeGreaterThan(network.edges[0].width)
+  })
+})

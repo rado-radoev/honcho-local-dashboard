@@ -3,6 +3,7 @@ import { useHashRoute } from './lib/routing'
 import { ConnectScreen } from './components/ConnectScreen'
 import { Sidebar } from './components/Sidebar'
 import { GetStartedPage } from './pages/GetStartedPage'
+import { MemoryMapPage } from './pages/MemoryMapPage'
 import { ExplorePage } from './pages/ExplorePage'
 import { WorkspacePage } from './pages/WorkspacePage'
 import { PeersPage } from './pages/PeersPage'
@@ -25,6 +26,8 @@ function RoutedPage({ route }: { route: Route }) {
       return <GetStartedPage />
     case 'explore':
       return <ExplorePage />
+    case 'memory-map':
+      return <MemoryMapPage workspaceId={route.workspaceId} />
     case 'status':
       return <StatusPage />
     case 'cloud-only':

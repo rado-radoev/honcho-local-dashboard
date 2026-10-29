@@ -6,9 +6,18 @@ import { useEffect, useState } from 'react'
 
 export type CloudPageId = 'members' | 'billing'
 
+export interface ConclusionsRouteParams {
+  observer: string
+  observed: string
+  level: string
+  sessionId: string
+}
+
 export type Route =
   | { name: 'get-started' }
   | { name: 'explore' }
+  | { name: 'memory-map', workspaceId: string | null }
+  | { name: 'conclusions', workspaceId: string | null, filters: ConclusionsRouteParams }
   | { name: 'status' }
   | { name: 'performance' }
   | { name: 'playground' }
@@ -31,6 +40,18 @@ export function routeToHash(route: Route): string {
       return '#/get-started'
     case 'explore':
       return '#/explore'
+    case 'memory-map':
+      return route.workspaceId ? `#/memory-map/${route.workspaceId}` : '#/memory-map'
+    case 'conclusions': {
+      const params = new URLSearchParams()
+      if (route.filters.observer) params.set('observer', route.filters.observer)
+      if (route.filters.observed) params.set('observed', route.filters.observed)
+      if (route.filters.level) params.set('level', route.filters.level)
+      if (route.filters.sessionId) params.set('session', route.filters.sessionId)
+      const query = params.toString()
+      const base = route.workspaceId ? `#/conclusions/${route.workspaceId}` : '#/conclusions'
+      return query ? `${base}?${query}` : base
+    }
     case 'status':
       return '#/status'
     case 'performance':
@@ -67,6 +88,24 @@ export function parseHash(hash: string): Route {
   if (segments.length === 0) return { name: 'explore' }
   if (segments[0] === 'get-started') return { name: 'get-started' }
   if (segments[0] === 'explore') return { name: 'explore' }
+  if (segments[0] === 'memory-map') {
+    return {
+      name: 'memory-map',
+      workspaceId: segments.length >= 2 ? decodeURIComponent(segments[1]) : null,
+    }
+  }
+  if (segments[0] === 'conclusions') {
+    return {
+      name: 'conclusions',
+      workspaceId: segments.length >= 2 ? decodeURIComponent(segments[1]) : null,
+      filters: {
+        observer: params.get('observer') ?? '',
+        observed: params.get('observed') ?? '',
+        level: params.get('level') ?? '',
+        sessionId: params.get('session') ?? '',
+      },
+    }
+  }
   if (segments[0] === 'status') return { name: 'status' }
   if (segments[0] === 'performance') return { name: 'performance' }
   if (segments[0] === 'playground') return { name: 'playground' }
