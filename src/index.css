@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+/*
+  Visual language mirrors the layout patterns of the Honcho cloud dashboard
+  (dark sidebar, monospace labels, pale-blue count badges) using our own
+  palette and the system monospace stack — no brand assets or fonts.
+*/
+@theme {
+  --color-ink: #0a0e1a;
+  --color-ink-deep: #060913;
+  --color-panel: #10141f;
+  --color-panel-raise: #161b29;
+  --color-line: #232a3d;
+  --color-fog: #9fb0cc;
+  --color-mist: #dbe4f5;
+  --color-badge: #bcd6ff;
+  --color-badge-ink: #0a0e1a;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html,
+body {
+  background: var(--color-ink);
+  color: var(--color-mist);
+  font-family: var(--font-mono);
+}
+
+::selection {
+  background: #2c4a7c;
+}

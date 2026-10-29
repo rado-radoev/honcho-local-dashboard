@@ -1,0 +1,151 @@
+# Honcho Local Dashboard
+
+A web dashboard for **self-hosted [Honcho](https://github.com/plastic-labs/honcho)** —
+the memory server for AI agents (Hermes Agent and friends). Think of it as what
+[app.honcho.dev](https://app.honcho.dev) does for Honcho Cloud, pointed at your
+own instance: browse workspaces, peers, sessions, messages, conclusions,
+representations, and peer cards, search memory, and ask questions about a peer
+(the dialectic chat) — all read-only, all against your local server.
+
+The information architecture deliberately mirrors the cloud dashboard — same
+sidebar sections in the same order (Get Started, Explore, Instance Status,
+Performance, API Playground, API Keys, Webhooks, Members, Billing), same
+terminology, same list → detail flows (Explore → Workspace → Peers/Sessions →
+Utilities pages with tabs) — so anyone who knows the cloud UI finds this one
+instantly familiar. The implementation, styling, and code are original; no
+cloud assets are used. Pages that only manage a cloud account (Billing,
+Members, …) appear in the sidebar with a `CLOUD` tag and explain what their
+local equivalent is instead of pretending to work.
+
+> **v1 is read-only.** The dashboard never creates, edits, or deletes memory
+> data. Create buttons appear (as in the cloud UI) but are disabled.
+
+## Screenshots
+
+`screenshots/` holds a PNG of every main view, captured from demo mode at
+1600×1000 (see [Visual regression baselines](#visual-regression-baselines)).
+In words: a dark sidebar with monospace navigation; an Explore page with a
+workspaces table (Workspace ID / Created At / Metadata / Configuration); a
+workspace overview with Peers and Sessions panels side by side; Peer Utilities
+(Search / Chat / Sessions / Peer Card / Representation / Conclusions / Config)
+and Session Utilities (Messages / Search / Context / Peers) tab pages; and an
+Instance Status page with API health and per-workspace deriver queue counts.
+
+## Quick start
+
+```bash
+npm install
+npm run dev
+```
+
+Open the app, enter your Honcho server URL (default `http://localhost:8000`)
+and — only if your server runs with `AUTH_USE_AUTH=true` — a JWT/API token,
+then **Connect**. Settings persist in the browser's `localStorage`; the token
+is stored only in your browser and sent only to your server.
+
+**No server handy?** Click **Explore demo data** on the connect screen (or
+open `/?demo=1`) to tour the whole UI with bundled sample data — the same
+example workspace (`test-1`: alice, bob, charlie, two group chats) used in
+Honcho's official dashboard screenshots, plus a small `hermes` workspace.
+
+## How connection and auth work
+
+- Health is checked with `GET /health` (expects `{"status":"ok"}`). The
+  sidebar shows a green/red status dot, like the cloud sidebar.
+- If a token is set, every request carries `Authorization: Bearer <token>`.
+  Self-hosted Honcho with auth disabled ignores it.
+- Views are hash-routed (`#/workspace/test-1/peers/alice?tab=chat`), so every
+  screen is deep-linkable and bookmarkable.
+
+## CORS and the dev proxy
+
+The Honcho API does not reliably emit CORS headers for browser apps, so
+calling it directly from a page served on another origin can be blocked by
+the browser. This project handles that in development:
+
+- In `npm run dev` (and `npm run preview`), requests to the configured
+  server go through Vite's proxy (`/honcho-api` → `VITE_HONCHO_TARGET`,
+  default `http://localhost:8000`) **when the server you connect to is the
+  proxy target**. Copy `.env.example` to `.env` and set `VITE_HONCHO_TARGET`
+  if your server lives elsewhere, then connect using that same URL.
+- Connecting to any other URL uses a direct fetch, which works only if that
+  server allows CORS from the dashboard's origin.
+
+**Production:** serve the built dashboard (`npm run build` → `dist/`) from
+the **same origin** as the Honcho API, or put both behind a reverse proxy
+that forwards `/honcho-api`-style traffic — same-origin requests have no
+CORS problem at all. Don't expose a no-auth Honcho server to the public
+internet just to make CORS go away; put the dashboard on your LAN/Tailscale
+like the server itself.
+
+## Endpoints used (Honcho v3 API)
+
+Verified against `docs/v3/openapi.json` and the FastAPI routers in
+plastic-labs/honcho (main branch):
+
+| Method | Path | Used for |
+| --- | --- | --- |
+| GET | `/health` | Connection health check |
+| GET | `/openapi.json` | Server version on Instance Status (best effort) |
+| POST | `/v3/workspaces/list` | Explore workspaces table |
+| POST | `/v3/workspaces/{id}/peers/list` | Peers tables |
+| GET | `/v3/workspaces/{id}/peers/{peer}/card` | Peer Card tab |
+| POST | `/v3/workspaces/{id}/peers/{peer}/representation` | Representation tab |
+| POST | `/v3/workspaces/{id}/conclusions/list` (filter `observed_id`) | Conclusions tab |
+| POST | `/v3/workspaces/{id}/peers/{peer}/chat` | Chat (dialectic) tab |
+| POST | `/v3/workspaces/{id}/peers/{peer}/search` | Peer Search tab |
+| POST | `/v3/workspaces/{id}/peers/{peer}/sessions` | Peer Sessions tab |
+| POST | `/v3/workspaces/{id}/sessions/list` | Sessions tables |
+| POST | `/v3/workspaces/{id}/sessions/{session}/messages/list` | Session Messages tab |
+| GET | `/v3/workspaces/{id}/sessions/{session}/peers` | Session Peers tab, message filter |
+| GET | `/v3/workspaces/{id}/sessions/{session}/summaries` | Session summary panel |
+| GET | `/v3/workspaces/{id}/sessions/{session}/context` | Session Context ("Get Context") tab |
+| POST | `/v3/workspaces/{id}/sessions/{session}/search` | Session Search tab |
+| POST | `/v3/workspaces/{id}/search` | Workspace Search |
+| GET | `/v3/workspaces/{id}/queue/status` | Deriver queue on Instance Status |
+
+## Development
+
+```bash
+npm run dev          # dev server with the /honcho-api proxy
+npm test             # vitest: API client unit tests (mocked fetch)
+npm run build        # type-check + production build into dist/
+npm run screenshots  # see below
+```
+
+Stack: Vite + React + TypeScript, Tailwind CSS, lucide-react icons. The API
+layer is an interface (`src/api/honchoApi.ts`) with two implementations —
+`HonchoClient` (live HTTP) and `DemoHonchoApi` (fixtures) — which is what
+makes demo mode and server-free screenshots possible.
+
+## Visual regression baselines
+
+```bash
+npm run build
+npm run screenshots
+```
+
+`scripts/screenshots.mjs` serves the production build via `vite preview`,
+drives it with Playwright at a fixed 1600×1000 viewport, walks every main
+view in demo mode (running the searches, the chat ask, and Get Context so
+views are populated), and writes PNGs to `screenshots/`. It exits non-zero
+if any view throws a page error. The committed PNGs are the baselines from
+the current build — re-run and diff after UI changes.
+
+## Roadmap (v2 ideas, not built)
+
+- Writes: create workspaces/peers/sessions, add messages, edit config —
+  the full cloud utility set
+- Conclusion management: inspect sources, delete conclusions
+  (`DELETE /v3/workspaces/{id}/conclusions/{conclusion_id}`)
+- API Keys page for real: mint scoped keys via `POST /v3/keys`
+- Webhooks list (read-only) via `GET /v3/workspaces/{id}/webhooks`
+- Representation/conclusion graphs: visualize observer → observed links
+- Streaming chat responses (`stream: true` on the chat endpoint)
+
+## License
+
+MIT — see [LICENSE](LICENSE). Not affiliated with Plastic Labs; "Honcho" is
+used descriptively (this dashboard is a client for the Honcho API).
+Screenshots and documentation of the cloud dashboard referenced during
+development belong to their respective owners and are not included here.
