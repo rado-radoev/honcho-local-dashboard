@@ -4,7 +4,8 @@ import { useConnection } from '../state/connection'
 import { useAsyncData } from '../lib/useAsyncData'
 import { formatDateTime } from '../lib/format'
 import { navigate } from '../lib/routing'
-import { Breadcrumbs, CountBadge, ErrorBox, PageHeader, RefreshButton, Spinner } from '../components/ui'
+import { Breadcrumbs, CountBadge, ErrorBox, PageHeader, RefreshButton, Spinner, TabBar } from '../components/ui'
+import { WorkspaceChatTab } from './WorkspaceChatTab'
 import { MessageList } from '../components/MessageList'
 import { Dialog, darkButtonClass, dialogInputClass, dialogLabelClass, primaryButtonClass } from '../components/Dialog'
 import type { Message } from '../types'
@@ -17,8 +18,14 @@ import type { Message } from '../types'
 
 type CreateKind = 'peer' | 'session' | null
 
+const WORKSPACE_TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'chat', label: 'Workspace Chat' },
+]
+
 export function WorkspacePage({ workspaceId }: { workspaceId: string }) {
   const { api } = useConnection()
+  const [activeTab, setActiveTab] = useState('overview')
 
   const peers = useAsyncData(
     async () => (api ? api.listPeers(workspaceId, 1, 50) : null),
@@ -186,6 +193,11 @@ export function WorkspacePage({ workspaceId }: { workspaceId: string }) {
         </p>
       ) : null}
 
+      <TabBar tabs={WORKSPACE_TABS} activeTab={activeTab} onSelect={setActiveTab} />
+
+      {activeTab === 'chat' ? <WorkspaceChatTab workspaceId={workspaceId} /> : null}
+      {activeTab === 'overview' ? (
+      <>
       <div className="grid items-start gap-6 lg:grid-cols-[1fr_auto_1fr]">
         <section aria-label="Peers">
           <div className="mb-3 flex items-center gap-3">
@@ -327,6 +339,8 @@ export function WorkspacePage({ workspaceId }: { workspaceId: string }) {
           </div>
         ) : null}
       </section>
+      </>
+      ) : null}
 
       {createKind ? (
         <Dialog

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { CheckCircle2, RefreshCw, Server, XCircle } from 'lucide-react'
 import { useConnection } from '../state/connection'
 import { useAsyncData } from '../lib/useAsyncData'
@@ -125,14 +126,17 @@ function DeriverMachineRow({
 }
 
 function QueueRow({ workspaceId }: { workspaceId: string }) {
+  const [expanded, setExpanded] = useState(false)
   const { api } = useConnection()
   const { data, error } = useAsyncData(
     async () => (api ? api.getQueueStatus(workspaceId) : null),
     [api, workspaceId],
   )
 
+  const sessionEntries = data?.sessions ? Object.values(data.sessions) : []
   return (
-    <div className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-md border border-line bg-panel px-4 py-3 text-sm">
+    <div className="rounded-md border border-line bg-panel px-4 py-3 text-sm">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
       <span className="font-semibold text-mist">{workspaceId}</span>
       {error ? <span className="text-red-300">queue unavailable</span> : null}
       {data ? (
@@ -149,7 +153,41 @@ function QueueRow({ workspaceId }: { workspaceId: string }) {
           <span className="text-fog">
             pending <span className="text-mist">{data.pending_work_units}</span>
           </span>
+          {sessionEntries.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setExpanded((current) => !current)}
+              className="ml-auto text-xs text-fog underline decoration-dotted hover:text-mist"
+            >
+              {expanded ? 'hide per-session' : `per-session (${sessionEntries.length})`}
+            </button>
+          ) : null}
         </>
+      ) : null}
+      </div>
+      {expanded && sessionEntries.length > 0 ? (
+        <table className="mt-3 w-full border-t border-line text-xs" aria-label={`Queue by session for ${workspaceId}`}>
+          <thead>
+            <tr className="text-left tracking-widest text-fog">
+              <th className="py-2 pr-3 font-medium">SESSION</th>
+              <th className="py-2 pr-3 font-medium">TOTAL</th>
+              <th className="py-2 pr-3 font-medium">COMPLETED</th>
+              <th className="py-2 pr-3 font-medium">IN PROGRESS</th>
+              <th className="py-2 font-medium">PENDING</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sessionEntries.map((entry) => (
+              <tr key={entry.session_id ?? 'unknown'} className="border-t border-line">
+                <td className="py-1.5 pr-3 text-mist">{entry.session_id ?? '—'}</td>
+                <td className="py-1.5 pr-3 tabular-nums">{entry.total_work_units}</td>
+                <td className="py-1.5 pr-3 tabular-nums">{entry.completed_work_units}</td>
+                <td className="py-1.5 pr-3 tabular-nums">{entry.in_progress_work_units}</td>
+                <td className="py-1.5 tabular-nums">{entry.pending_work_units}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       ) : null}
     </div>
   )

@@ -14,6 +14,7 @@ import {
   Spinner,
   TabBar,
 } from '../components/ui'
+import { PeerExportButtons } from '../components/PeerExport'
 import { MessageList } from '../components/MessageList'
 
 // Peer Utilities page, mirroring the cloud peer dashboard. The cloud tab
@@ -65,6 +66,7 @@ export function PeerPage({
 
       <h2 className="mb-5 flex items-center gap-3 text-lg text-fog">
         Peer Utilities for <span className="font-bold text-mist">{peerId}</span>
+        <PeerExportButtons workspaceId={workspaceId} peerId={peerId} />
         <span className="flex items-center gap-1.5 text-sm text-fog" title="Read-only in the local v1">
           <Pencil className="h-4 w-4" /> Edit Config (read-only here)
         </span>
