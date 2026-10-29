@@ -4,6 +4,7 @@ import { ConnectScreen } from './components/ConnectScreen'
 import { Sidebar } from './components/Sidebar'
 import { GetStartedPage } from './pages/GetStartedPage'
 import { MemoryMapPage } from './pages/MemoryMapPage'
+import { ConclusionsPage } from './pages/ConclusionsPage'
 import { ExplorePage } from './pages/ExplorePage'
 import { WorkspacePage } from './pages/WorkspacePage'
 import { PeersPage } from './pages/PeersPage'
@@ -28,6 +29,8 @@ function RoutedPage({ route }: { route: Route }) {
       return <ExplorePage />
     case 'memory-map':
       return <MemoryMapPage workspaceId={route.workspaceId} />
+    case 'conclusions':
+      return <ConclusionsPage workspaceId={route.workspaceId} initialFilters={route.filters} />
     case 'status':
       return <StatusPage />
     case 'cloud-only':
