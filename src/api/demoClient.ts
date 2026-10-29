@@ -228,6 +228,10 @@ function searchMessages(pool: Message[], query: string, limit: number): Message[
 const allMessages: Message[] = Object.values(messagesBySession).flat()
 
 export class DemoHonchoApi implements HonchoApi {
+  routeDescription(): string {
+    return 'demo fixtures (no server request)'
+  }
+
   async health(): Promise<{ status: string }> {
     return { status: 'ok' }
   }

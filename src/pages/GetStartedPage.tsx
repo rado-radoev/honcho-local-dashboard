@@ -6,7 +6,7 @@ import { ErrorBox, PageHeader } from '../components/ui'
 // "Get Started" — the local counterpart of the cloud Welcome page:
 // connection summary, what this dashboard can do, and the first steps.
 export function GetStartedPage() {
-  const { mode, baseUrl, health, healthError } = useConnection()
+  const { mode, baseUrl, routeDescription, health, healthError } = useConnection()
 
   let statusText = 'Checking…'
   if (health === 'connected') statusText = 'Connected'
@@ -33,6 +33,12 @@ export function GetStartedPage() {
         <dl className="mt-3 grid grid-cols-[140px_1fr] gap-y-2 text-sm">
           <dt className="text-fog">Server</dt>
           <dd className="text-mist">{mode === 'demo' ? 'Demo data (no server)' : baseUrl}</dd>
+          {routeDescription ? (
+            <>
+              <dt className="text-fog">Route</dt>
+              <dd className="text-mist">{routeDescription}</dd>
+            </>
+          ) : null}
           <dt className="text-fog">Status</dt>
           <dd className="text-mist">{statusText}</dd>
           <dt className="text-fog">Mode</dt>

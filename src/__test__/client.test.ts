@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
-import { HonchoClient, HonchoError, resolveRequestBase, shouldUseProxy } from '../api/client'
+import {
+  HonchoClient,
+  HonchoError,
+  formatHealthError,
+  resolveRequestBase,
+  shouldUseProxy,
+} from '../api/client'
+import { DemoHonchoApi } from '../api/demoClient'
 
 // Tests for the Honcho API client: URL building (including the dev-proxy
 // rule), the auth header, error handling, and request shapes for the
@@ -256,5 +263,79 @@ describe('HonchoClient', () => {
     const caught = await client.health().catch((error: unknown) => error)
     expect(caught).toBeInstanceOf(HonchoError)
     expect((caught as HonchoError).status).toBe(0)
+  })
+})
+
+describe('routeDescription', () => {
+  it('describes the proxy route with the configured server', () => {
+    const client = new HonchoClient({
+      baseUrl: 'http://localhost:8000',
+      proxyTarget: 'http://127.0.0.1:8000',
+      useProxy: true,
+    })
+    expect(client.routeDescription()).toBe(
+      'GET /honcho-api/health (via Vite proxy — useProxy on, configured server http://localhost:8000)',
+    )
+  })
+
+  it('describes a direct route when the proxy is off (production build)', () => {
+    const client = new HonchoClient({
+      baseUrl: 'http://localhost:8000',
+      proxyTarget: 'http://localhost:8000',
+      useProxy: false,
+    })
+    expect(client.routeDescription()).toBe(
+      'GET http://localhost:8000/health (direct, no proxy — useProxy off)',
+    )
+  })
+
+  it('describes a direct route in dev when the server is not the proxy target', () => {
+    const client = new HonchoClient({
+      baseUrl: 'http://192.168.1.50:8000',
+      proxyTarget: 'http://localhost:8000',
+      useProxy: true,
+    })
+    expect(client.routeDescription()).toBe(
+      'GET http://192.168.1.50:8000/health (direct, no proxy — useProxy on)',
+    )
+  })
+
+  it('demo client reports demo fixtures instead of a server route', () => {
+    expect(new DemoHonchoApi().routeDescription()).toBe('demo fixtures (no server request)')
+  })
+})
+
+describe('health failure diagnostics', () => {
+  it('a network-failed health check, surfaced via the connection, names the tried proxy route', async () => {
+    const fetchFn = vi.fn(async () => {
+      throw new Error('connection refused')
+    }) as unknown as typeof fetch
+    const client = new HonchoClient({
+      baseUrl: 'http://localhost:8000',
+      proxyTarget: 'http://localhost:8000',
+      useProxy: true,
+      fetchFn,
+    })
+
+    const caught = await client.health().catch((error: unknown) => error)
+    const message = formatHealthError(caught, client)
+
+    expect(message).toContain('Could not reach the Honcho server')
+    expect(message).toContain(
+      '— tried: GET /honcho-api/health (via Vite proxy — useProxy on, configured server http://localhost:8000)',
+    )
+  })
+
+  it('an HTTP-error health check, surfaced via the connection, names the tried direct route', async () => {
+    const fetchFn = mockFetch(jsonResponse({ detail: 'Invalid token' }, 401))
+    const client = new HonchoClient({ baseUrl: 'http://honcho.local:8000', fetchFn })
+
+    const caught = await client.health().catch((error: unknown) => error)
+    const message = formatHealthError(caught, client)
+
+    expect(message).toContain('Invalid token')
+    expect(message).toContain(
+      '— tried: GET http://honcho.local:8000/health (direct, no proxy — useProxy off)',
+    )
   })
 })

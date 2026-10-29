@@ -15,6 +15,11 @@ import type {
 // Implemented twice: HonchoClient (live HTTP) and DemoHonchoApi (fixtures),
 // so every view can render without a live server in demo mode.
 export interface HonchoApi {
+  // Human-readable description of the route requests actually take, for
+  // connection diagnostics: proxy vs direct, the exact URL a request goes
+  // to, and the configured server. Shown in health errors and on the
+  // Get Started page so a failed connection reports what was tried.
+  routeDescription(): string
   health(): Promise<{ status: string }>
   // Best-effort server version from GET /openapi.json (info.version).
   serverVersion(): Promise<string | null>
