@@ -142,7 +142,8 @@ export class HonchoClient implements HonchoApi {
   constructor(options: HonchoClientOptions) {
     this.requestBase = resolveRequestBase(options)
     this.token = options.token
-    this.fetchFn = options.fetchFn ?? fetch
+    // Native browser fetch requires the global receiver, not this client.
+    this.fetchFn = options.fetchFn ?? globalThis.fetch.bind(globalThis)
   }
 
   private async request<T>(

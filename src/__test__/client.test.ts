@@ -150,6 +150,27 @@ describe('shouldUseProxy', () => {
 })
 
 describe('HonchoClient', () => {
+  it('calls the default browser fetch with its global receiver', async () => {
+    const fetchFn = vi.fn(async function (this: typeof globalThis) {
+      if (this !== globalThis) throw new TypeError('Illegal invocation')
+      return jsonResponse({ status: 'ok' })
+    })
+    vi.stubGlobal('fetch', fetchFn)
+
+    try {
+      const client = new HonchoClient({ baseUrl: 'http://localhost:8000', useProxy: true })
+
+      await expect(client.health()).resolves.toEqual({ status: 'ok' })
+      expect(fetchFn).toHaveBeenCalledWith('/honcho-api/health', {
+        method: 'GET',
+        headers: {},
+        body: undefined,
+      })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('health() GETs /health and returns the parsed body', async () => {
     const fetchFn = mockFetch(jsonResponse({ status: 'ok' }))
     const client = new HonchoClient({ baseUrl: 'http://honcho.local:8000', fetchFn })
