@@ -11,6 +11,10 @@ export interface ConclusionsRouteParams {
   observed: string
   level: string
   sessionId: string
+  // Explicit conclusion-id allow-list (Phase C Fault Lines jump
+  // link: open the Explorer showing exactly one cluster's members).
+  // Empty = no id filtering.
+  ids: string[]
 }
 
 export type Route =
@@ -48,6 +52,7 @@ export function routeToHash(route: Route): string {
       if (route.filters.observed) params.set('observed', route.filters.observed)
       if (route.filters.level) params.set('level', route.filters.level)
       if (route.filters.sessionId) params.set('session', route.filters.sessionId)
+      if (route.filters.ids.length > 0) params.set('ids', route.filters.ids.join(','))
       const query = params.toString()
       const base = route.workspaceId ? `#/conclusions/${route.workspaceId}` : '#/conclusions'
       return query ? `${base}?${query}` : base
@@ -103,6 +108,7 @@ export function parseHash(hash: string): Route {
         observed: params.get('observed') ?? '',
         level: params.get('level') ?? '',
         sessionId: params.get('session') ?? '',
+        ids: (params.get('ids') ?? '').split(',').filter((id) => id.length > 0),
       },
     }
   }

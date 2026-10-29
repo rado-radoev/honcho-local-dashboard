@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { AlertTriangle, ScrollText, Search, Trash2 } from 'lucide-react'
+import { AlertTriangle, ScrollText, Search, Trash2, X } from 'lucide-react'
 import { useConnection } from '../state/connection'
 import { useAsyncData } from '../lib/useAsyncData'
 import { navigate, type ConclusionsRouteParams } from '../lib/routing'
@@ -29,6 +29,9 @@ export function ConclusionsPage({
   const workspaces = useAsyncData(async () => (api ? api.listWorkspaces(1, 50) : null), [api])
   const activeWorkspace = workspaceId ?? workspaces.data?.items[0]?.id ?? null
 
+  // Explicit id allow-list from the route (Fault Lines jump link).
+  // Applied client-side over the capped set; cleared by its banner.
+  const [ids, setIds] = useState<string[]>(initialFilters.ids)
   const [level, setLevel] = useState(initialFilters.level)
   const [observer, setObserver] = useState(initialFilters.observer)
   const [observed, setObserved] = useState(initialFilters.observed)
@@ -64,7 +67,11 @@ export function ConclusionsPage({
   )
 
   const items = useMemo(() => {
-    const base = queryResults ?? capped.data?.items ?? []
+    let base = queryResults ?? capped.data?.items ?? []
+    if (ids.length > 0) {
+      const idSet = new Set(ids)
+      base = base.filter((item) => idSet.has(item.id))
+    }
     const sorted = [...base]
     if (sort === 'recent') sorted.sort((a, b) => b.created_at.localeCompare(a.created_at))
     else {
@@ -74,7 +81,7 @@ export function ConclusionsPage({
       })
     }
     return sorted
-  }, [queryResults, capped.data, sort])
+  }, [queryResults, capped.data, sort, ids])
 
   async function runQuery() {
     if (!api || !activeWorkspace || query.trim().length === 0) return
@@ -121,7 +128,7 @@ export function ConclusionsPage({
               navigate({
                 name: 'conclusions',
                 workspaceId: workspace.id,
-                filters: { observer, observed, level, sessionId },
+                filters: { observer, observed, level, sessionId, ids: [] },
               })
             }
             className={
@@ -218,6 +225,24 @@ export function ConclusionsPage({
         </form>
       </div>
 
+      {ids.length > 0 ? (
+        <div
+          className="mb-4 flex items-center gap-2 rounded-md border border-line bg-panel px-3 py-2 text-sm text-mist"
+          data-testid="ids-filter-banner"
+        >
+          <span>
+            Showing only the {ids.length} conclusion{ids.length === 1 ? '' : 's'} linked from
+            Fault Lines.
+          </span>
+          <button
+            type="button"
+            onClick={() => setIds([])}
+            className="ml-auto flex items-center gap-1 rounded-md border border-line px-2 py-1 text-xs text-mist hover:bg-panel-raise"
+          >
+            <X className="h-3.5 w-3.5" /> Clear id filter
+          </button>
+        </div>
+      ) : null}
       {queryError ? (
         <div className="mb-4"><ErrorBox message={queryError} /></div>
       ) : null}

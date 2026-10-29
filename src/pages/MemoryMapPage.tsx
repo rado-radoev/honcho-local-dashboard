@@ -5,8 +5,14 @@ import { useAsyncData } from '../lib/useAsyncData'
 import { navigate } from '../lib/routing'
 import { formatDateTime } from '../lib/format'
 import { ErrorBox, PageHeader, Spinner } from '../components/ui'
-import { ConstellationSvg, NetworkSvg } from '../components/MemoryMapCanvas'
+import {
+  ConstellationSvg,
+  NetworkSvg,
+  type ConstellationColorMode,
+} from '../components/MemoryMapCanvas'
 import { TimelineSvg } from '../components/TimelineCanvas'
+import { FaultLinesPanel } from '../components/FaultLines'
+import { maxCreatedAtMs } from '../lib/ageStyle'
 import { GrowthChart } from '../components/charts'
 import { buildGrowthSeries } from '../lib/charts'
 import { CONCLUSION_LEVELS, LEVEL_COLORS, cappedLabel } from '../lib/conclusions'
@@ -67,7 +73,10 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
     [api, activeWorkspace],
   )
 
-  const [mode, setMode] = useState<'constellation' | 'network' | 'timeline'>('constellation')
+  const [mode, setMode] = useState<'constellation' | 'network' | 'timeline' | 'fault'>('constellation')
+  // Dusk overlay (Phase C2): constellation colour mode — level
+  // colours, or age fading relative to the reference "now" below.
+  const [colorMode, setColorMode] = useState<ConstellationColorMode>('level')
   const [view, setView] = useState<'map' | 'list'>('map')
   const [levels, setLevels] = useState<Set<ConclusionLevel>>(new Set(CONCLUSION_LEVELS))
   const [hiddenPeers, setHiddenPeers] = useState<Set<string>>(new Set())
@@ -96,6 +105,16 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
   const [dismissedData, setDismissedData] = useState<CappedConclusions | null>(null)
 
   const all = useMemo(() => capped.data?.items ?? [], [capped.data])
+
+  // Dusk reference "now": live mode uses the real clock (snapshotted
+  // once at mount — age is day-grained, so a mount-time "now" is the
+  // stable reference for the whole view); still (demo/screenshot)
+  // mode uses the dataset's max created_at so Age renders are
+  // deterministic and baselines stay byte-stable.
+  const [mountNowMs] = useState(() => Date.now())
+  const datasetMaxMs = maxCreatedAtMs(all)
+  let referenceNowMs = mountNowMs
+  if (still && datasetMaxMs !== null) referenceNowMs = datasetMaxMs
 
   // Append-stable dot slots: advanced (purely) whenever the full
   // dataset changes, so a cache refresh that adds/removes conclusions
@@ -322,9 +341,27 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
   }
 
   // The map-mode canvas, picked with statements (never nested
-  // ternaries): Constellation, Network, or Thread-Timeline.
+  // ternaries): Constellation, Network, Thread-Timeline, or the
+  // Fault Lines contradictions view (Phase C1 — a fourth mode over
+  // the SAME capped dataset this page already fetched, unfiltered:
+  // every contradiction in the fetched set, not just visible dots).
   let mapCanvas
-  if (mode === 'timeline') {
+  if (mode === 'fault') {
+    mapCanvas = (
+      <FaultLinesPanel
+        conclusions={all}
+        onOpenInExplorer={(ids) => {
+          if (activeWorkspace) {
+            navigate({
+              name: 'conclusions',
+              workspaceId: activeWorkspace,
+              filters: { observer: '', observed: '', level: '', sessionId: '', ids },
+            })
+          }
+        }}
+      />
+    )
+  } else if (mode === 'timeline') {
     mapCanvas = (
       <TimelineSvg
         conclusions={timelineItems}
@@ -346,7 +383,7 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
             navigate({
               name: 'conclusions',
               workspaceId: activeWorkspace,
-              filters: { observer, observed, level: '', sessionId: '' },
+              filters: { observer, observed, level: '', sessionId: '', ids: [] },
             })
           }
         }}
@@ -366,6 +403,8 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
         activeTraceStep={activeTraceStep}
         still={still}
         bornIds={bornIds}
+        colorMode={colorMode}
+        referenceNowMs={referenceNowMs}
         onSelect={setSelected}
         onHover={setHover}
         onHubClick={handleHubClick}
@@ -383,6 +422,10 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
   if (mode === 'network') {
     detailHint =
       'Arrows aggregate observer → observed conclusions between peers. Click an arrow to open those conclusions in the Explorer.'
+  }
+  if (mode === 'fault') {
+    detailHint =
+      'Fault Lines groups every contradiction in the fetched set by source linkage — cross-references, shared source conclusions, shared source messages. Anything with no discoverable link is listed as Unlinked, never force-matched.'
   }
 
   return (
@@ -500,7 +543,34 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
           >
             Timeline
           </button>
+          <button
+            type="button"
+            onClick={() => setMode('fault')}
+            className={mode === 'fault' ? 'bg-panel-raise px-3 py-1.5 text-sm text-mist' : 'px-3 py-1.5 text-sm text-fog'}
+          >
+            Fault Lines
+          </button>
         </div>
+        {mode === 'constellation' ? (
+          <div className="flex overflow-hidden rounded-md border border-line" role="group" aria-label="Constellation colour mode">
+            <button
+              type="button"
+              onClick={() => setColorMode('level')}
+              aria-pressed={colorMode === 'level'}
+              className={colorMode === 'level' ? 'bg-panel-raise px-3 py-1.5 text-sm text-mist' : 'px-3 py-1.5 text-sm text-fog'}
+            >
+              Level
+            </button>
+            <button
+              type="button"
+              onClick={() => setColorMode('age')}
+              aria-pressed={colorMode === 'age'}
+              className={colorMode === 'age' ? 'bg-panel-raise px-3 py-1.5 text-sm text-mist' : 'px-3 py-1.5 text-sm text-fog'}
+            >
+              Age
+            </button>
+          </div>
+        ) : null}
         <div className="flex overflow-hidden rounded-md border border-line" role="group" aria-label="View">
           <button
             type="button"
@@ -693,7 +763,7 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
                     navigate({
                       name: 'conclusions',
                       workspaceId: activeWorkspace,
-                      filters: { observer: '', observed: selected.observed_id, level: '', sessionId: '' },
+                      filters: { observer: '', observed: selected.observed_id, level: '', sessionId: '', ids: [] },
                     })
                   }
                 >
@@ -764,10 +834,19 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
               ) : null}
             </div>
           ) : null}
-          <p className="mt-4 border-t border-line pt-3 text-[11px] leading-relaxed text-fog">
-            Legend: colors — explicit #BCD6FF · deductive #6EA8FF · inductive #B79CFF ·
-            contradiction #FF7A7A. Dot radius = √(times derived).
-          </p>
+          {mode === 'constellation' && colorMode === 'age' ? (
+            <p className="mt-4 border-t border-line pt-3 text-[11px] leading-relaxed text-fog">
+              Legend (Age): dots fade with age — newest at full strength and full level colour,
+              oldest floored at 25% opacity, desaturated toward fog #9FB0CC. Hub labels show when
+              each peer was last learned about; a fog dot on a hub ring means that peer has been
+              quiet for over 30 days (advisory only).
+            </p>
+          ) : (
+            <p className="mt-4 border-t border-line pt-3 text-[11px] leading-relaxed text-fog">
+              Legend: colors — explicit #BCD6FF · deductive #6EA8FF · inductive #B79CFF ·
+              contradiction #FF7A7A. Dot radius = √(times derived).
+            </p>
+          )}
         </aside>
       </div>
     </div>

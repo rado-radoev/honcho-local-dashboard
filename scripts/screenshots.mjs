@@ -105,6 +105,35 @@ const DEMO_VIEWS = [
     },
   },
   {
+    file: 'memory-map-fault-lines.png',
+    hash: '#/memory-map/hermes',
+    interact: async (page) => {
+      await page.getByRole('button', { name: 'Fault Lines', exact: true }).click()
+      await page.getByTestId('fault-lines').waitFor()
+      const clusters = await page.getByTestId('fault-cluster').count()
+      if (clusters < 1) throw new Error(`fault lines: expected >= 1 linked cluster, got ${clusters}`)
+      const cards = await page.getByTestId('fault-card').count()
+      if (cards < 7) throw new Error(`fault lines: expected >= 7 contradiction cards, got ${cards}`)
+      const unlinked = await page.getByTestId('fault-unlinked').count()
+      if (unlinked !== 1) throw new Error(`fault lines: expected the Unlinked group, got ${unlinked}`)
+    },
+  },
+  {
+    // Dusk Age mode is deterministic under ?still=1: the page's
+    // reference "now" is the dataset's max created_at, so this
+    // baseline is byte-stable like the Level one.
+    file: 'memory-map-age.png',
+    hash: '#/memory-map/hermes',
+    interact: async (page) => {
+      await page.getByRole('button', { name: 'Age', exact: true }).click()
+      await page.getByTestId('hub-last-learned').first().waitFor()
+      const labels = await page.getByTestId('hub-last-learned').count()
+      if (labels < 3) throw new Error(`memory map age: expected >= 3 hub last-learned labels, got ${labels}`)
+      const dots = await page.getByTestId('map-dot').count()
+      if (dots < 50) throw new Error(`memory map age: expected >= 50 conclusion dots, got ${dots}`)
+    },
+  },
+  {
     file: 'conclusions.png',
     hash: '#/conclusions/hermes',
     interact: async (page) => {

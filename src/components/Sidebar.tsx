@@ -42,7 +42,7 @@ const NAV_ITEMS: NavItem[] = [
   {
     label: 'CONCLUSIONS',
     icon: <ScrollText className={iconClass} />,
-    route: { name: 'conclusions', workspaceId: null, filters: { observer: '', observed: '', level: '', sessionId: '' } },
+    route: { name: 'conclusions', workspaceId: null, filters: { observer: '', observed: '', level: '', sessionId: '', ids: [] } },
     cloudOnly: false,
   },
   { label: 'INSTANCE STATUS', icon: <Server className={iconClass} />, route: { name: 'status' }, cloudOnly: false },

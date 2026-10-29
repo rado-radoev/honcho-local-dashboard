@@ -13,6 +13,17 @@ import { orbitBandForDistance, orbitRotationDeg } from '../lib/orbit'
 import type { StableSlot } from '../lib/stableLayout'
 import { focusOpacity, focusScale, focusTransform } from '../lib/hubFocus'
 import type { TraceChainResult } from '../lib/traceChain'
+import {
+  AGE_FOG_COLOR,
+  ageFill,
+  ageOpacity,
+  buildAgeContext,
+  isQuietPeer,
+  lastLearnedByPeer,
+  lastLearnedLabel,
+} from '../lib/ageStyle'
+
+export type ConstellationColorMode = 'level' | 'age'
 
 // SVG rendering for the Memory Map (no canvas, no animation library).
 // Constellation: peer hubs with gradient-ring strokes + conclusion dots.
@@ -164,6 +175,8 @@ export function ConstellationSvg({
   activeTraceStep,
   still,
   bornIds,
+  colorMode = 'level',
+  referenceNowMs,
   onSelect,
   onHover,
   onHubClick,
@@ -187,6 +200,15 @@ export function ConstellationSvg({
   // Conclusions born in the latest refresh (lib/newMemories.ts): each
   // gets a one-shot expanding birth ring (never under still mode).
   bornIds: ReadonlySet<string>
+  // Dusk overlay (lib/ageStyle.ts): 'age' fades dot fill/opacity by
+  // created_at age instead of showing pure level colours. A pure
+  // per-dot styling layer — orbit groups, trace, focus and tooltips
+  // are computed exactly as in Level mode.
+  colorMode?: ConstellationColorMode
+  // Reference "now" for age math. Live callers pass the real clock;
+  // demo/screenshot callers pass the dataset's max created_at so the
+  // render is deterministic. Defaults to that dataset max.
+  referenceNowMs?: number
   onSelect: (conclusion: Conclusion) => void
   onHover: (dot: DotLayout | null) => void
   onHubClick: (peerId: string) => void
@@ -207,6 +229,19 @@ export function ConstellationSvg({
   }
   const peerScale = focusScale(peerIds.length)
   const groupRefs = useRef(new Map<string, GroupHandle>())
+  // Dusk context: resolved "now" (prop, else the dataset's own max
+  // created_at) + per-peer last-learned instants for the hub labels.
+  let resolvedNowMs = referenceNowMs
+  if (resolvedNowMs === undefined) {
+    let max = 0
+    for (const item of conclusions) {
+      const ms = Date.parse(item.created_at)
+      if (!Number.isNaN(ms) && ms > max) max = ms
+    }
+    resolvedNowMs = max
+  }
+  const ageContext = buildAgeContext(conclusions, resolvedNowMs)
+  const lastLearned = lastLearnedByPeer(conclusions)
 
   return (
     <svg
@@ -374,6 +409,15 @@ export function ConstellationSvg({
                     stroke = '#FFFFFF'
                     strokeWidth = 1.5
                   }
+                  // Dusk: in Age mode the dot's fill desaturates
+                  // toward fog and its opacity scales by age (floor
+                  // ~25%) ON TOP of the trace/search opacity above —
+                  // selection, trace and hover behaviour are unchanged.
+                  let fill = dot.color
+                  if (colorMode === 'age') {
+                    opacity = opacity * ageOpacity(dot.conclusion.created_at, ageContext)
+                    fill = ageFill(dot.color, dot.conclusion.created_at, ageContext)
+                  }
                   const glowing = isSelected || tState === 'current'
                   const showBirthRing = bornIds.has(dot.conclusion.id) && !still
                   const showTracePulse = tState === 'current' && !still && trace !== null
@@ -385,7 +429,7 @@ export function ConstellationSvg({
                         cx={dot.x}
                         cy={dot.y}
                         r={isSelected ? dot.r + 2 : dot.r}
-                        fill={dot.color}
+                        fill={fill}
                         opacity={opacity}
                         stroke={stroke}
                         strokeWidth={strokeWidth}
@@ -503,9 +547,50 @@ export function ConstellationSvg({
           <text x={hub.x} y={hub.y + 28} textAnchor="middle" fill="#DBE4F5" fontSize={12}>
             {hub.peerId}
           </text>
+          {colorMode === 'age' ? renderHubAge(hub, lastLearned.get(hub.peerId), resolvedNowMs) : null}
         </g>
       ))}
     </svg>
+  )
+}
+
+// Dusk hub extras (Age mode only): a "last learned Xd ago" line under
+// the peer name, plus — for a peer quiet beyond the threshold — a
+// soft FOG marker dot on the hub ring. Advisory only: fog, never red
+// (red stays reserved for contradictions/errors).
+function renderHubAge(
+  hub: HubLayout,
+  lastMs: number | undefined,
+  nowMs: number,
+) {
+  if (lastMs === undefined) return null
+  const quiet = isQuietPeer(lastMs, nowMs)
+  return (
+    <>
+      <text
+        x={hub.x}
+        y={hub.y + 42}
+        textAnchor="middle"
+        fill={AGE_FOG_COLOR}
+        fontSize={10}
+        data-testid="hub-last-learned"
+        data-peer={hub.peerId}
+      >
+        {lastLearnedLabel(lastMs, nowMs)}
+      </text>
+      {quiet ? (
+        <circle
+          cx={hub.x + 13}
+          cy={hub.y - 13}
+          r={3.5}
+          fill={AGE_FOG_COLOR}
+          data-testid="hub-quiet-marker"
+          data-peer={hub.peerId}
+        >
+          <title>{`No new conclusions about ${hub.peerId} for over 30 days`}</title>
+        </circle>
+      ) : null}
+    </>
   )
 }
 
