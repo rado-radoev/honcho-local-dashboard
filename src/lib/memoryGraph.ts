@@ -72,10 +72,17 @@ function dedupe(conclusions: Conclusion[]): Conclusion[] {
   return out
 }
 
-function dotRadius(timesDerived: number, small: boolean): number {
-  if (small) return 2
+// Shared dot-size encoding: radius grows with √(times derived),
+// 3px at ×1 up to 7px at ×6+. The constellation and the thread
+// timeline use the same scale so a dot means the same thing in both.
+export function radiusForTimesDerived(timesDerived: number): number {
   const scaled = 3 + ((Math.sqrt(Math.max(1, timesDerived)) - 1) / (Math.sqrt(6) - 1)) * 4
   return Math.min(7, Math.max(3, scaled))
+}
+
+function dotRadius(timesDerived: number, small: boolean): number {
+  if (small) return 2
+  return radiusForTimesDerived(timesDerived)
 }
 
 function clamp(value: number, min: number, max: number): number {

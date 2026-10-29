@@ -6,6 +6,7 @@ import { navigate } from '../lib/routing'
 import { formatDateTime } from '../lib/format'
 import { ErrorBox, PageHeader, Spinner } from '../components/ui'
 import { ConstellationSvg, NetworkSvg } from '../components/MemoryMapCanvas'
+import { TimelineSvg } from '../components/TimelineCanvas'
 import { GrowthChart } from '../components/charts'
 import { buildGrowthSeries } from '../lib/charts'
 import { CONCLUSION_LEVELS, LEVEL_COLORS, cappedLabel } from '../lib/conclusions'
@@ -66,7 +67,7 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
     [api, activeWorkspace],
   )
 
-  const [mode, setMode] = useState<'constellation' | 'network'>('constellation')
+  const [mode, setMode] = useState<'constellation' | 'network' | 'timeline'>('constellation')
   const [view, setView] = useState<'map' | 'list'>('map')
   const [levels, setLevels] = useState<Set<ConclusionLevel>>(new Set(CONCLUSION_LEVELS))
   const [hiddenPeers, setHiddenPeers] = useState<Set<string>>(new Set())
@@ -194,6 +195,20 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
     return items
   }, [all, levels, hiddenPeers, scrub, sortedByTime])
 
+  // Thread-Timeline inputs (Phase B): in still mode the timeline
+  // always renders the FULL static range (no scrubber cut, no
+  // playhead); live, it consumes the same scrubbed `visible` set as
+  // the other modes, so the time scrubber + Play drive its birth
+  // replay — dots appear exactly at their created_at moment.
+  const timelineItems = useMemo(() => {
+    if (!still) return visible
+    return all.filter((item) => levels.has(item.level) && !hiddenPeers.has(item.observed_id))
+  }, [still, visible, all, levels, hiddenPeers])
+  let playheadAt: string | null = null
+  if (!still && scrub !== null && sortedByTime.length > 0) {
+    playheadAt = sortedByTime[Math.min(scrub, sortedByTime.length - 1)].created_at
+  }
+
   useEffect(() => {
     if (!playing) return
     playRef.current = window.setInterval(() => {
@@ -306,6 +321,70 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
     })
   }
 
+  // The map-mode canvas, picked with statements (never nested
+  // ternaries): Constellation, Network, or Thread-Timeline.
+  let mapCanvas
+  if (mode === 'timeline') {
+    mapCanvas = (
+      <TimelineSvg
+        conclusions={timelineItems}
+        peerIds={visiblePeerIds}
+        selected={selected}
+        search={search}
+        playheadAt={playheadAt}
+        still={still}
+        onSelect={setSelected}
+      />
+    )
+  } else if (mode === 'network') {
+    mapCanvas = (
+      <NetworkSvg
+        conclusions={visible}
+        peerIds={peerIds}
+        onEdgeClick={(observer, observed) => {
+          if (activeWorkspace) {
+            navigate({
+              name: 'conclusions',
+              workspaceId: activeWorkspace,
+              filters: { observer, observed, level: '', sessionId: '' },
+            })
+          }
+        }}
+      />
+    )
+  } else {
+    mapCanvas = (
+      <ConstellationSvg
+        conclusions={visible}
+        peerIds={visiblePeerIds}
+        selected={selected}
+        search={search}
+        motion={motion}
+        slots={stableSlots}
+        focusedPeer={focusedPeer}
+        trace={trace ? trace.result : null}
+        activeTraceStep={activeTraceStep}
+        still={still}
+        bornIds={bornIds}
+        onSelect={setSelected}
+        onHover={setHover}
+        onHubClick={handleHubClick}
+        onBackgroundClick={handleBackgroundClick}
+      />
+    )
+  }
+
+  let detailHint =
+    'Click a dot to inspect a conclusion. Dot color = level, size = times derived, oldest conclusions sit closest to their peer hub.'
+  if (mode === 'timeline') {
+    detailHint =
+      'Click a dot to inspect a conclusion. Lane = observed peer, position = when it was created, color = level, size = times derived; arcs trace what each conclusion was derived from.'
+  }
+  if (mode === 'network') {
+    detailHint =
+      'Arrows aggregate observer → observed conclusions between peers. Click an arrow to open those conclusions in the Explorer.'
+  }
+
   return (
     <div>
       <PageHeader
@@ -414,6 +493,13 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
           >
             Network
           </button>
+          <button
+            type="button"
+            onClick={() => setMode('timeline')}
+            className={mode === 'timeline' ? 'bg-panel-raise px-3 py-1.5 text-sm text-mist' : 'px-3 py-1.5 text-sm text-fog'}
+          >
+            Timeline
+          </button>
         </div>
         <div className="flex overflow-hidden rounded-md border border-line" role="group" aria-label="View">
           <button
@@ -486,39 +572,7 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
       <div className="flex items-start gap-4">
         <div className="blueprint-bg relative min-w-0 flex-1 rounded-[10px] border border-line bg-panel">
           {view === 'map' ? (
-            mode === 'constellation' ? (
-              <ConstellationSvg
-                conclusions={visible}
-                peerIds={visiblePeerIds}
-                selected={selected}
-                search={search}
-                motion={motion}
-                slots={stableSlots}
-                focusedPeer={focusedPeer}
-                trace={trace ? trace.result : null}
-                activeTraceStep={activeTraceStep}
-                still={still}
-                bornIds={bornIds}
-                onSelect={setSelected}
-                onHover={setHover}
-                onHubClick={handleHubClick}
-                onBackgroundClick={handleBackgroundClick}
-              />
-            ) : (
-              <NetworkSvg
-                conclusions={visible}
-                peerIds={peerIds}
-                onEdgeClick={(observer, observed) => {
-                  if (activeWorkspace) {
-                    navigate({
-                      name: 'conclusions',
-                      workspaceId: activeWorkspace,
-                      filters: { observer, observed, level: '', sessionId: '' },
-                    })
-                  }
-                }}
-              />
-            )
+            mapCanvas
           ) : (
             <div className="max-h-[560px] overflow-y-auto p-3">
               <table className="w-full text-sm">
@@ -648,10 +702,7 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
               ) : null}
             </div>
           ) : (
-            <p className="text-sm leading-relaxed text-fog">
-              Click a dot to inspect a conclusion. Dot color = level, size = times derived,
-              oldest conclusions sit closest to their peer hub.
-            </p>
+            <p className="text-sm leading-relaxed text-fog">{detailHint}</p>
           )}
           {trace ? (
             <div className="mt-5 border-t border-line pt-3">

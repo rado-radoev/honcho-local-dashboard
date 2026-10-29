@@ -93,6 +93,18 @@ const DEMO_VIEWS = [
     },
   },
   {
+    file: 'memory-map-timeline.png',
+    hash: '#/memory-map/hermes',
+    interact: async (page) => {
+      await page.getByRole('button', { name: 'Timeline', exact: true }).click()
+      await page.getByTestId('timeline-svg').waitFor()
+      const dots = await page.getByTestId('timeline-dot').count()
+      if (dots < 50) throw new Error(`memory map timeline: expected >= 50 timeline dots, got ${dots}`)
+      const arcs = await page.getByTestId('timeline-arc').count()
+      if (arcs < 50) throw new Error(`memory map timeline: expected >= 50 derivation arcs, got ${arcs}`)
+    },
+  },
+  {
     file: 'conclusions.png',
     hash: '#/conclusions/hermes',
     interact: async (page) => {
