@@ -238,6 +238,68 @@ export function buildHermesConclusions(): Conclusion[] {
   return conclusions
 }
 
+// Demo-pulse fixture set (Phase A2): three extra hermes conclusions
+// that exist ONLY when the demo pulse flag is on (?demoPulse=1 in the
+// URL, or DemoHonchoApi({ pulse: true }) in tests). The demo client's
+// capped fetch appends them from its SECOND call onward, simulating a
+// live cache refresh that learns new memories — this is a fixture
+// mechanism, clearly separate from the static fixture data above, and
+// it never affects workspace counts or the static screenshot data.
+export const DEMO_PULSE_CONCLUSIONS: Conclusion[] = [
+  {
+    id: 'concl_demo_pulse_01',
+    content: 'Radoslav asked Hermes to trace how a memory was derived.',
+    observer_id: 'hermes',
+    observed_id: 'radoslav',
+    session_id: 'hermes-desktop',
+    level: 'explicit',
+    source_ids: ['concl_demo_hermes_02'],
+    source_message_ids: [],
+    times_derived: 1,
+    created_at: '2026-10-29T14:00:00Z',
+  },
+  {
+    id: 'concl_demo_pulse_02',
+    content: 'Radoslav prefers watching new memories appear on the map as they form.',
+    observer_id: 'hermes',
+    observed_id: 'radoslav',
+    session_id: 'hermes-desktop',
+    level: 'deductive',
+    source_ids: ['concl_demo_pulse_01'],
+    source_message_ids: [],
+    times_derived: 2,
+    created_at: '2026-10-29T14:05:00Z',
+  },
+  {
+    id: 'concl_demo_pulse_03',
+    content: 'Radoslav focuses one peer cluster at a time when reading the map.',
+    observer_id: 'hermes',
+    observed_id: 'radoslav',
+    session_id: 'hermes-desktop',
+    level: 'inductive',
+    source_ids: ['concl_demo_pulse_02'],
+    source_message_ids: [],
+    times_derived: 1,
+    created_at: '2026-10-29T14:10:00Z',
+  },
+]
+
+export const DEMO_PULSE_CONCLUSION_IDS: string[] = DEMO_PULSE_CONCLUSIONS.map(
+  (item) => item.id,
+)
+
+// True when the page URL carries the demo-pulse fixture flag. Guarded
+// for non-browser environments (unit tests inject the flag through
+// the DemoHonchoApi constructor instead).
+export function isDemoPulseSearch(search: string): boolean {
+  return new URLSearchParams(search).get('demoPulse') === '1'
+}
+
+export function demoPulseEnabledInBrowser(): boolean {
+  if (typeof window === 'undefined') return false
+  return isDemoPulseSearch(window.location.search)
+}
+
 // Four extra test-1 conclusions (10 total with the 6 hand-written ones),
 // chained onto the hand-written explicit conclusions by id.
 export function buildTest1ExtraConclusions(): Conclusion[] {

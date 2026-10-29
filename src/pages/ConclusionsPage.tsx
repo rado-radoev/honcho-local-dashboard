@@ -7,6 +7,7 @@ import { formatDateTime } from '../lib/format'
 import { EmptyState, ErrorBox, PageHeader, Spinner } from '../components/ui'
 import { Dialog } from '../components/Dialog'
 import { LEVEL_COLORS, cappedLabel } from '../lib/conclusions'
+import { traceChain } from '../lib/traceChain'
 import type { Conclusion, ConclusionFilters } from '../types'
 
 // Conclusions Explorer: filter / sort / semantically query the capped
@@ -323,9 +324,11 @@ export function ConclusionsPage({
   )
 }
 
-// Recursive source chain: follows source_ids up to depth 5, resolving
-// ids from the already-fetched capped pool first and the API second.
-// Also lists the source_message_ids each conclusion was derived from.
+// Source chain: follows source_ids up to depth 5 via the shared pure
+// traceChain() walk (lib/traceChain.ts — the same traversal the Memory
+// Map's derivation trace uses), resolving ids from the already-fetched
+// capped pool first and the API second. Also lists the
+// source_message_ids each conclusion was derived from.
 function SourceChain({
   workspaceId,
   conclusion,
@@ -344,7 +347,13 @@ function SourceChain({
     return map
   }, [pool, extra])
 
-  const missing = conclusion.source_ids.filter((id) => !byId.has(id))
+  const trace = useMemo(() => traceChain(conclusion, byId), [conclusion, byId])
+
+  // Fetch every unresolved id in the walked chain (not just the
+  // root's direct sources) so deeper ancestors can resolve too.
+  const missing = trace.steps
+    .filter((step) => step.missing && step.id !== conclusion.id)
+    .map((step) => step.id)
   const missingKey = missing.join(',')
   const [requested, setRequested] = useState('')
   if (missing.length > 0 && requested !== missingKey && api) {
@@ -364,46 +373,47 @@ function SourceChain({
 
   return (
     <div className="mt-4 border-t border-line pt-3">
-      <ChainNode conclusion={conclusion} byId={byId} depth={0} isRoot />
-    </div>
-  )
-}
-
-function ChainNode({
-  conclusion,
-  byId,
-  depth,
-  isRoot = false,
-}: {
-  conclusion: Conclusion
-  byId: Map<string, Conclusion>
-  depth: number
-  isRoot?: boolean
-}) {
-  return (
-    <div className={isRoot ? '' : 'mt-2 border-l border-line pl-3'}>
-      {!isRoot ? <p className="text-xs leading-relaxed text-mist">{conclusion.content}</p> : null}
-      {conclusion.source_message_ids && conclusion.source_message_ids.length > 0 ? (
-        <p className="mt-1 text-[11px] text-fog">
-          from messages: {conclusion.source_message_ids.join(', ')}
-        </p>
-      ) : null}
-      {depth >= 5 && conclusion.source_ids.length > 0 ? (
+      {trace.steps.map((step) => {
+        if (step.depth === 0) {
+          const root = step.conclusion
+          if (!root) return null
+          if (!root.source_message_ids || root.source_message_ids.length === 0) return null
+          return (
+            <p key={step.id} className="text-[11px] text-fog">
+              from messages: {root.source_message_ids.join(', ')}
+            </p>
+          )
+        }
+        if (step.missing || !step.conclusion) {
+          return (
+            <p
+              key={step.id}
+              className="mt-2 border-l border-line pl-3 text-[11px] text-fog"
+              style={{ marginLeft: (step.depth - 1) * 12 }}
+            >
+              {step.id} (not in capped set)
+            </p>
+          )
+        }
+        const item = step.conclusion
+        return (
+          <div
+            key={step.id}
+            className="mt-2 border-l border-line pl-3"
+            style={{ marginLeft: (step.depth - 1) * 12 }}
+          >
+            <p className="text-xs leading-relaxed text-mist">{item.content}</p>
+            {item.source_message_ids && item.source_message_ids.length > 0 ? (
+              <p className="mt-1 text-[11px] text-fog">
+                from messages: {item.source_message_ids.join(', ')}
+              </p>
+            ) : null}
+          </div>
+        )
+      })}
+      {trace.truncated ? (
         <p className="mt-1 text-[11px] text-fog">chain truncated at depth 5</p>
       ) : null}
-      {depth < 5
-        ? conclusion.source_ids.map((sourceId) => {
-            const source = byId.get(sourceId)
-            if (!source) {
-              return (
-                <p key={sourceId} className="mt-2 border-l border-line pl-3 text-[11px] text-fog">
-                  {sourceId} (not in capped set)
-                </p>
-              )
-            }
-            return <ChainNode key={sourceId} conclusion={source} byId={byId} depth={depth + 1} />
-          })
-        : null}
     </div>
   )
 }

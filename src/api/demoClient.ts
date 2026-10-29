@@ -23,6 +23,8 @@ import {
   buildHermesConclusions,
   buildHermesMessages,
   buildTest1ExtraConclusions,
+  demoPulseEnabledInBrowser,
+  DEMO_PULSE_CONCLUSIONS,
   HERMES_SESSION_PEERS,
   HERMES_SESSIONS,
 } from './demoFixtures'
@@ -327,6 +329,22 @@ export class DemoHonchoApi implements HonchoApi {
     return collector
   })()
 
+  // Demo-pulse fixture flag (Phase A2): when enabled, the capped
+  // fetch appends DEMO_PULSE_CONCLUSIONS from its second call onward,
+  // simulating a refresh that learns new memories. Resolved from the
+  // constructor override first, then the ?demoPulse=1 URL flag.
+  private readonly pulseOverride?: boolean
+  private readonly cappedCallCounts = new Map<string, number>()
+
+  constructor(options?: { pulse?: boolean }) {
+    this.pulseOverride = options?.pulse
+  }
+
+  private pulseEnabled(): boolean {
+    if (this.pulseOverride !== undefined) return this.pulseOverride
+    return demoPulseEnabledInBrowser()
+  }
+
   routeDescription(): string {
     return 'demo fixtures (no server request)'
   }
@@ -501,6 +519,22 @@ export class DemoHonchoApi implements HonchoApi {
     filters: ConclusionFilters = {},
   ): Promise<CappedConclusions> {
     const key = `${workspaceId}|${JSON.stringify(filters)}`
+    // Pulse mode bypasses the cache entirely: each call is a fresh
+    // "refresh", and from the second call on the pulse conclusions
+    // join the hermes set (see DEMO_PULSE_CONCLUSIONS in fixtures).
+    if (this.pulseEnabled()) {
+      const calls = (this.cappedCallCounts.get(key) ?? 0) + 1
+      this.cappedCallCounts.set(key, calls)
+      const value = await fetchCapped(async (page, size) =>
+        this.listConclusions(workspaceId, filters, page, size),
+      )
+      if (calls < 2 || workspaceId !== 'hermes') return value
+      const present = new Set(value.items.map((item) => item.id))
+      const added = DEMO_PULSE_CONCLUSIONS.filter((item) => !present.has(item.id))
+      if (added.length === 0) return value
+      const items = [...value.items, ...added]
+      return { items, total: value.total + added.length, capped: value.capped }
+    }
     const cached = this.demoConclusionsCache.get(key)
     if (cached && Date.now() - cached.at < CONCLUSIONS_CACHE_MS) return cached.value
     const value = await fetchCapped(async (page, size) =>

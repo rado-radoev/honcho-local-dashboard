@@ -11,6 +11,8 @@ import {
 } from '../lib/memoryGraph'
 import { orbitBandForDistance, orbitRotationDeg } from '../lib/orbit'
 import type { StableSlot } from '../lib/stableLayout'
+import { focusOpacity, focusScale, focusTransform } from '../lib/hubFocus'
+import type { TraceChainResult } from '../lib/traceChain'
 
 // SVG rendering for the Memory Map (no canvas, no animation library).
 // Constellation: peer hubs with gradient-ring strokes + conclusion dots.
@@ -131,6 +133,25 @@ function ConstellationMotion({
   return null
 }
 
+// How one dot relates to the active derivation trace: lit hops are
+// at or before the travelling pulse, `current` is the hop the pulse
+// sits on, `pending` hops wait their turn, `dim` dots are not in the
+// chain at all, and `none` means no trace is active.
+type TraceDotState = 'none' | 'lit' | 'current' | 'pending' | 'dim'
+
+function traceDotState(
+  id: string,
+  trace: TraceChainResult | null,
+  activeStep: number,
+): TraceDotState {
+  if (!trace) return 'none'
+  const index = trace.orderById.get(id)
+  if (index === undefined) return 'dim'
+  if (index === activeStep) return 'current'
+  if (index < activeStep) return 'lit'
+  return 'pending'
+}
+
 export function ConstellationSvg({
   conclusions,
   peerIds,
@@ -138,8 +159,15 @@ export function ConstellationSvg({
   search,
   motion,
   slots,
+  focusedPeer,
+  trace,
+  activeTraceStep,
+  still,
+  bornIds,
   onSelect,
   onHover,
+  onHubClick,
+  onBackgroundClick,
 }: {
   conclusions: Conclusion[]
   peerIds: string[]
@@ -147,15 +175,37 @@ export function ConstellationSvg({
   search: string
   motion: boolean
   slots?: ReadonlyMap<string, StableSlot>
+  // Hub focus mode (lib/hubFocus.ts): the peer whose cluster stays
+  // opaque + scales up, or null when focus is off.
+  focusedPeer: string | null
+  // Derivation trace (lib/traceChain.ts): the walked source chain of
+  // the traced conclusion, keyed by conclusion id so highlighting
+  // survives orbiting dots.
+  trace: TraceChainResult | null
+  activeTraceStep: number
+  still: boolean
+  // Conclusions born in the latest refresh (lib/newMemories.ts): each
+  // gets a one-shot expanding birth ring (never under still mode).
+  bornIds: ReadonlySet<string>
   onSelect: (conclusion: Conclusion) => void
   onHover: (dot: DotLayout | null) => void
+  onHubClick: (peerId: string) => void
+  onBackgroundClick: () => void
 }) {
   const layout = layoutConstellation(conclusions, peerIds, MAP_WIDTH, MAP_HEIGHT)
   const dots = applyStableSlots(layout.dots, layout.hubs, slots)
   const dotById = new Map(dots.map((dot) => [dot.conclusion.id, dot]))
+  const hubByPeer = new Map(layout.hubs.map((hub) => [hub.peerId, hub]))
   const needle = search.trim().toLowerCase()
   const selectedDot = selected ? dotById.get(selected.id) : undefined
   const groups = buildOrbitGroups(dots, layout.hubs)
+  const groupsByPeer = new Map<string, OrbitGroup[]>()
+  for (const group of groups) {
+    const list = groupsByPeer.get(group.hub.peerId) ?? []
+    list.push(group)
+    groupsByPeer.set(group.hub.peerId, list)
+  }
+  const peerScale = focusScale(peerIds.length)
   const groupRefs = useRef(new Map<string, GroupHandle>())
 
   return (
@@ -175,11 +225,48 @@ export function ConstellationSvg({
 
       <ConstellationMotion motion={motion} groupRefs={groupRefs} />
 
+      {/* Background click target (hub focus exit). Behind everything;
+          dot and hub handlers stopPropagation so only true empty-space
+          clicks reach it. */}
+      <rect
+        x={0}
+        y={0}
+        width={MAP_WIDTH}
+        height={MAP_HEIGHT}
+        fill="transparent"
+        data-testid="map-background"
+        onClick={onBackgroundClick}
+      />
+
       {/* Derivation edges stay at base angles (the simpler correct
           option): they are drawn from the deterministic layout, not
           from the rotating groups, so a selected dot's orbit does not
-          drag its source chain around. */}
-      {selectedDot
+          drag its source chain around. With a trace active, the whole
+          walked chain is drawn and edges light as the pulse passes. */}
+      {trace
+        ? trace.edges.map((edge) => {
+            const from = dotById.get(edge.from)
+            const to = dotById.get(edge.to)
+            if (!from || !to) return null
+            const targetStep = trace.orderById.get(edge.to) ?? 0
+            const lit = targetStep <= activeTraceStep
+            return (
+              <line
+                key={`${edge.from}->${edge.to}`}
+                data-testid="trace-edge"
+                x1={from.x}
+                y1={from.y}
+                x2={to.x}
+                y2={to.y}
+                stroke="#B79CFF"
+                strokeWidth={1.2}
+                strokeDasharray="4 3"
+                opacity={lit ? 0.9 : 0.25}
+              />
+            )
+          })
+        : null}
+      {!trace && selectedDot
         ? selectedDot.conclusion.source_ids.map((sourceId) => {
             const target = dotById.get(sourceId)
             if (!target) return null
@@ -200,7 +287,7 @@ export function ConstellationSvg({
 
       {layout.aggregated
         ? layout.cells.map((cell) => (
-            <g key={cell.peerId}>
+            <g key={cell.peerId} opacity={focusOpacity(focusedPeer, cell.peerId)}>
               <rect
                 x={cell.x - 26}
                 y={cell.y - 26}
@@ -218,69 +305,200 @@ export function ConstellationSvg({
           ))
         : null}
 
-      {groups.map((group) => (
-        <g
-          key={group.key}
-          ref={(el) => {
-            if (el) {
-              groupRefs.current.set(group.key, {
-                el,
-                band: group.band,
-                hubX: group.hub.x,
-                hubY: group.hub.y,
-              })
-            } else {
-              groupRefs.current.delete(group.key)
-            }
-          }}
-        >
-          {group.dots.map((dot) => (
-            <line
-              key={`tether-${dot.conclusion.id}`}
-              data-testid="map-tether"
-              x1={group.hub.x}
-              y1={group.hub.y}
-              x2={dot.x}
-              y2={dot.y}
-              stroke="#8EA3C7"
-              strokeWidth={0.6}
-              opacity={0.14}
-              pointerEvents="none"
-            />
-          ))}
-          {group.dots.map((dot) => {
-            const matches =
-              needle.length === 0 || dot.conclusion.content.toLowerCase().includes(needle)
-            const isSelected = selected?.id === dot.conclusion.id
-            return (
-              <circle
-                key={dot.conclusion.id}
-                data-testid="map-dot"
-                cx={dot.x}
-                cy={dot.y}
-                r={isSelected ? dot.r + 2 : dot.r}
-                fill={dot.color}
-                opacity={matches ? 0.9 : 0.13}
-                stroke={isSelected ? '#FFFFFF' : 'transparent'}
-                strokeWidth={isSelected ? 1.5 : 7}
-                style={
-                  isSelected
-                    ? { filter: 'drop-shadow(0 0 6px rgba(183,156,255,0.9))', cursor: 'pointer' }
-                    : { cursor: 'pointer' }
-                }
-                onMouseEnter={() => onHover(dot)}
-                onMouseLeave={() => onHover(null)}
-                onClick={() => onSelect(dot.conclusion)}
+      {/* One wrapper group per peer carries the focus opacity + scale
+          transform; the orbit band groups inside keep their own rAF
+          rotation transform, so orbit, tooltips, and dot clicks all
+          keep working inside focus mode. */}
+      {layout.hubs.map((hub) => {
+        const peerGroups = groupsByPeer.get(hub.peerId) ?? []
+        if (peerGroups.length === 0) return null
+        const scale = focusedPeer === hub.peerId ? peerScale : 1
+        return (
+          <g
+            key={hub.peerId}
+            data-testid="peer-group"
+            data-peer={hub.peerId}
+            opacity={focusOpacity(focusedPeer, hub.peerId)}
+            transform={focusTransform(hub, scale)}
+          >
+            {peerGroups.map((group) => (
+              <g
+                key={group.key}
+                ref={(el) => {
+                  if (el) {
+                    groupRefs.current.set(group.key, {
+                      el,
+                      band: group.band,
+                      hubX: group.hub.x,
+                      hubY: group.hub.y,
+                    })
+                  } else {
+                    groupRefs.current.delete(group.key)
+                  }
+                }}
               >
-                <title>{dot.conclusion.content}</title>
-              </circle>
-            )
-          })}
-        </g>
-      ))}
+                {group.dots.map((dot) => (
+                  <line
+                    key={`tether-${dot.conclusion.id}`}
+                    data-testid="map-tether"
+                    x1={group.hub.x}
+                    y1={group.hub.y}
+                    x2={dot.x}
+                    y2={dot.y}
+                    stroke="#8EA3C7"
+                    strokeWidth={0.6}
+                    opacity={0.14}
+                    pointerEvents="none"
+                  />
+                ))}
+                {group.dots.map((dot) => {
+                  const matches =
+                    needle.length === 0 || dot.conclusion.content.toLowerCase().includes(needle)
+                  const isSelected = selected?.id === dot.conclusion.id
+                  const tState = traceDotState(dot.conclusion.id, trace, activeTraceStep)
+                  let opacity = matches ? 0.9 : 0.13
+                  if (tState === 'dim') opacity = 0.12
+                  if (tState === 'pending') opacity = 0.4
+                  if (tState === 'lit' || tState === 'current') opacity = 1
+                  let stroke = 'transparent'
+                  let strokeWidth = 7
+                  if (tState === 'lit') {
+                    stroke = 'rgba(255,255,255,0.85)'
+                    strokeWidth = 1
+                  }
+                  if (tState === 'current') {
+                    stroke = '#FFFFFF'
+                    strokeWidth = 1.5
+                  }
+                  if (isSelected) {
+                    stroke = '#FFFFFF'
+                    strokeWidth = 1.5
+                  }
+                  const glowing = isSelected || tState === 'current'
+                  const showBirthRing = bornIds.has(dot.conclusion.id) && !still
+                  const showTracePulse = tState === 'current' && !still && trace !== null
+                  return (
+                    <g key={dot.conclusion.id}>
+                      <circle
+                        data-testid="map-dot"
+                        data-conclusion-id={dot.conclusion.id}
+                        cx={dot.x}
+                        cy={dot.y}
+                        r={isSelected ? dot.r + 2 : dot.r}
+                        fill={dot.color}
+                        opacity={opacity}
+                        stroke={stroke}
+                        strokeWidth={strokeWidth}
+                        style={
+                          glowing
+                            ? { filter: 'drop-shadow(0 0 6px rgba(183,156,255,0.9))', cursor: 'pointer' }
+                            : { cursor: 'pointer' }
+                        }
+                        onMouseEnter={() => {
+                          if (focusedPeer === dot.peerId) {
+                            const focusHub = hubByPeer.get(dot.peerId)
+                            if (focusHub) {
+                              onHover({
+                                ...dot,
+                                x: focusHub.x + (dot.x - focusHub.x) * peerScale,
+                                y: focusHub.y + (dot.y - focusHub.y) * peerScale,
+                              })
+                              return
+                            }
+                          }
+                          onHover(dot)
+                        }}
+                        onMouseLeave={() => onHover(null)}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onSelect(dot.conclusion)
+                        }}
+                      >
+                        <title>{dot.conclusion.content}</title>
+                      </circle>
+                      {showBirthRing ? (
+                        <circle
+                          data-testid="birth-ring"
+                          cx={dot.x}
+                          cy={dot.y}
+                          r={dot.r + 2}
+                          fill="none"
+                          stroke={dot.color}
+                          strokeWidth={1.5}
+                          opacity={0.9}
+                          pointerEvents="none"
+                        >
+                          <animate
+                            attributeName="r"
+                            from={dot.r + 2}
+                            to={dot.r + 13}
+                            dur="1.6s"
+                            repeatCount="1"
+                            fill="freeze"
+                          />
+                          <animate
+                            attributeName="opacity"
+                            from={0.9}
+                            to={0}
+                            dur="1.6s"
+                            repeatCount="1"
+                            fill="freeze"
+                          />
+                        </circle>
+                      ) : null}
+                      {showTracePulse ? (
+                        <circle
+                          data-testid="trace-pulse"
+                          cx={dot.x}
+                          cy={dot.y}
+                          r={dot.r + 3}
+                          fill="none"
+                          stroke="#B79CFF"
+                          strokeWidth={1.5}
+                          opacity={0.9}
+                          pointerEvents="none"
+                        >
+                          <animate
+                            attributeName="r"
+                            from={dot.r + 3}
+                            to={dot.r + 10}
+                            dur="0.9s"
+                            repeatCount="indefinite"
+                          />
+                          <animate
+                            attributeName="opacity"
+                            from={0.9}
+                            to={0}
+                            dur="0.9s"
+                            repeatCount="indefinite"
+                          />
+                        </circle>
+                      ) : null}
+                    </g>
+                  )
+                })}
+              </g>
+            ))}
+          </g>
+        )
+      })}
 
       {layout.hubs.map((hub) => (
-        <g key={hub.peerId}>
+        <g
+          key={hub.peerId}
+          data-testid="map-hub"
+          data-peer={hub.peerId}
+          opacity={focusOpacity(focusedPeer, hub.peerId)}
+          style={{ cursor: 'pointer' }}
+          onClick={(event) => {
+            event.stopPropagation()
+            onHubClick(hub.peerId)
+          }}
+        >
+          <title>
+            {focusedPeer === hub.peerId ? `Unfocus ${hub.peerId}` : `Focus on ${hub.peerId}`}
+          </title>
+          <circle cx={hub.x} cy={hub.y} r={20} fill="transparent" />
           <circle cx={hub.x} cy={hub.y} r={13} fill="#10141F" stroke="url(#hub-ring)" strokeWidth={2} />
           <text x={hub.x} y={hub.y + 28} textAnchor="middle" fill="#DBE4F5" fontSize={12}>
             {hub.peerId}
