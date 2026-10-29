@@ -362,6 +362,11 @@ export class HonchoClient implements HonchoApi {
     return this.request<{ status: string }>('GET', '/health')
   }
 
+  clearServerData(): void {
+    this.conclusionsCache.clear()
+    this.stats.clear()
+  }
+
   async serverVersion(): Promise<string | null> {
     try {
       const spec = await this.request<{ info?: { version?: string } }>('GET', '/openapi.json')

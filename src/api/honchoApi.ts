@@ -28,6 +28,11 @@ import type { PerformanceStats } from '../lib/stats'
 export interface HonchoApi {
   routeDescription(): string
   health(): Promise<{ status: string }>
+  // Drop every piece of server-derived state this client holds (the
+  // conclusions cache and the performance stats collector). Called when
+  // the connection swaps to a different server, so the old server's data
+  // can never surface under the new connection.
+  clearServerData(): void
   serverVersion(): Promise<string | null>
   listWorkspaces(page?: number, size?: number): Promise<Page<Workspace>>
   createWorkspace(id: string): Promise<Workspace>

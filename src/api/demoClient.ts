@@ -335,6 +335,11 @@ export class DemoHonchoApi implements HonchoApi {
     return { status: 'ok' }
   }
 
+  clearServerData(): void {
+    this.demoConclusionsCache.clear()
+    this.stats.clear()
+  }
+
   async serverVersion(): Promise<string | null> {
     const version = demoSpec.info?.version
     if (!version) return null

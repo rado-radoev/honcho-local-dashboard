@@ -11,6 +11,7 @@ import {
 import type { HonchoApi } from '../api/honchoApi'
 import { HonchoClient, formatHealthError, shouldUseProxy } from '../api/client'
 import { DemoHonchoApi } from '../api/demoClient'
+import { swapToNewServer, type ServerSwapResult } from '../lib/connectionSwap'
 
 // Connection settings are persisted in localStorage so a refresh keeps the
 // session. The token is stored only in the browser, on this machine, and is
@@ -32,6 +33,9 @@ interface ConnectionContextValue {
   api: HonchoApi | null
   mode: ConnectionMode | null
   baseUrl: string
+  // The token saved with the current connection ('' when none / demo).
+  // Exposed so Settings can prefill its editable token field.
+  token: string
   // Route requests actually take (proxy vs direct, exact URL) — null when
   // no connection is active. Surfaced on the Get Started page so even a
   // working connection documents its path.
@@ -39,6 +43,10 @@ interface ConnectionContextValue {
   health: HealthState
   healthError: string | null
   connect: (baseUrl: string, token: string) => Promise<void>
+  // Settings-page server change: health-checks the NEW server first and
+  // only swaps (persist + rebuild + invalidate) when that passes. On
+  // failure the current connection is untouched and nothing is saved.
+  updateConnection: (baseUrl: string, token: string) => Promise<ServerSwapResult>
   startDemo: () => void
   disconnect: () => void
   refreshHealth: () => Promise<void>
@@ -71,16 +79,23 @@ function saveConnection(value: SavedConnection | null): void {
   }
 }
 
-function createApi(saved: SavedConnection): HonchoApi {
-  if (saved.mode === 'demo') return new DemoHonchoApi()
+// The one place live clients are built — the active connection, the
+// Settings candidate health check, everything goes through here, so the
+// bound fetch and resolveRequestBase proxy logic are identical for all.
+function createLiveApi(baseUrl: string, token: string): HonchoApi {
   return new HonchoClient({
-    baseUrl: saved.baseUrl,
-    token: saved.token || undefined,
+    baseUrl,
+    token: token || undefined,
     proxyTarget: import.meta.env.VITE_HONCHO_TARGET || undefined,
     // MODE, not DEV: a preview build is a production bundle (DEV=false)
     // served by `vite preview`, which does provide the /honcho-api proxy.
     useProxy: shouldUseProxy(import.meta.env.MODE),
   })
+}
+
+function createApi(saved: SavedConnection): HonchoApi {
+  if (saved.mode === 'demo') return new DemoHonchoApi()
+  return createLiveApi(saved.baseUrl, saved.token)
 }
 
 export function ConnectionProvider({ children }: { children: ReactNode }) {
@@ -91,6 +106,11 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   const apiRef = useRef<HonchoApi | null>(null)
 
   const applyConnection = useCallback((next: SavedConnection | null) => {
+    // Invalidate the outgoing client's server-derived state (conclusions
+    // cache + stats collector) before it is dropped, so nothing from the
+    // old server can surface through a stale reference. The incoming
+    // client is freshly built below and starts with empty caches anyway.
+    apiRef.current?.clearServerData()
     const api = next === null ? null : createApi(next)
     apiRef.current = api
     setRouteDescription(api?.routeDescription() ?? null)
@@ -145,6 +165,21 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
     [applyConnection],
   )
 
+  const updateConnection = useCallback(
+    async (baseUrl: string, token: string): Promise<ServerSwapResult> => {
+      return swapToNewServer(
+        { baseUrl, token },
+        {
+          createCandidate: (connection) => createLiveApi(connection.baseUrl, connection.token),
+          apply: (connection) => {
+            applyConnection({ mode: 'live', baseUrl: connection.baseUrl, token: connection.token })
+          },
+        },
+      )
+    },
+    [applyConnection],
+  )
+
   const startDemo = useCallback(() => {
     applyConnection({ mode: 'demo', baseUrl: 'demo://fixtures', token: '' })
   }, [applyConnection])
@@ -158,15 +193,27 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
       api: saved === null ? null : apiRef.current,
       mode: saved?.mode ?? null,
       baseUrl: saved?.baseUrl ?? DEFAULT_BASE_URL,
+      token: saved?.token ?? '',
       routeDescription,
       health,
       healthError,
       connect,
+      updateConnection,
       startDemo,
       disconnect,
       refreshHealth,
     }),
-    [saved, routeDescription, health, healthError, connect, startDemo, disconnect, refreshHealth],
+    [
+      saved,
+      routeDescription,
+      health,
+      healthError,
+      connect,
+      updateConnection,
+      startDemo,
+      disconnect,
+      refreshHealth,
+    ],
   )
 
   return <ConnectionContext.Provider value={value}>{children}</ConnectionContext.Provider>
