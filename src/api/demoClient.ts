@@ -1,17 +1,37 @@
 import type {
+  CappedConclusions,
   Conclusion,
+  ConclusionFilters,
+  ConclusionLevel,
   Message,
   Page,
   Peer,
   QueueStatus,
+  Scope,
+  ScopeStatus,
   Session,
   SessionSummaries,
   Workspace,
+  WorkspaceChatResult,
+  WorkspaceCounts,
 } from '../types'
 import type { HonchoApi } from './honchoApi'
 import type { CreateKeyOptions, ExecuteResult, WebhookEndpoint } from '../types'
 import type { OpenApiDoc } from './openapi'
 import { StatsCollector, seedDemoStats, type PerformanceStats } from '../lib/stats'
+import {
+  buildHermesConclusions,
+  buildHermesMessages,
+  buildTest1ExtraConclusions,
+  HERMES_SESSION_PEERS,
+  HERMES_SESSIONS,
+} from './demoFixtures'
+import {
+  CONCLUSION_LEVELS,
+  CONCLUSIONS_CACHE_MS,
+  fetchConclusionsCapped as fetchCapped,
+  filterConclusions,
+} from '../lib/conclusions'
 import demoSpecJson from './demoOpenApi.json'
 
 const demoSpec = demoSpecJson as unknown as OpenApiDoc
@@ -59,6 +79,7 @@ const peersByWorkspace: Record<string, Peer[]> = {
   hermes: [
     makePeer('hermes', 'radoslav', '2026-10-19T09:13:02Z'),
     makePeer('hermes', 'hermes', '2026-10-19T09:13:03Z'),
+    makePeer('hermes', 'claude', '2026-10-19T09:13:04Z'),
   ],
 }
 
@@ -79,17 +100,13 @@ const sessionsByWorkspace: Record<string, Session[]> = {
     makeSession('test-1', 'groupchat_1', '2025-08-25T13:25:19Z', true),
     makeSession('test-1', 'groupchat_2', '2025-08-25T13:25:28Z', false),
   ],
-  hermes: [
-    makeSession('hermes', 'hermes-desktop', '2026-10-20T16:02:11Z', true),
-    makeSession('hermes', 'evening-planning', '2026-10-26T02:41:37Z', false),
-  ],
+  hermes: HERMES_SESSIONS,
 }
 
 const sessionPeers: Record<string, string[]> = {
   groupchat_1: ['alice', 'bob', 'charlie'],
   groupchat_2: ['alice', 'charlie'],
-  'hermes-desktop': ['radoslav', 'hermes'],
-  'evening-planning': ['radoslav', 'hermes'],
+  ...HERMES_SESSION_PEERS,
 }
 
 const webhooksByWorkspace: Record<string, WebhookEndpoint[]> = {
@@ -178,6 +195,7 @@ const peerCards: Record<string, string[]> = {
     'Works in writing more comfortably than speaking',
   ],
   hermes: ['AI assistant peer for the hermes workspace', 'Runs GPT-class models via Azure Foundry and OpenRouter'],
+  claude: ['Second-opinion reviewer peer', 'Prefers deterministic, well-tested code'],
 }
 
 const representations: Record<string, string> = {
@@ -190,10 +208,12 @@ const representations: Record<string, string> = {
     'Radoslav is a web developer and stay-at-home mom in San Diego who self-hosts AI tooling (Hermes Agent with Honcho memory, on Proxmox LXCs). She steers work in short, direct instructions, expects claims to be backed by evidence, and prefers written communication. She has explicitly asked not to be reminded about school-choice topics unless she raises them.',
   hermes:
     'Hermes is the AI peer in this workspace. It answers questions, helps configure its own memory stack, and records durable preferences stated by the user peer.',
+  claude:
+    'Claude is the reviewer peer in this workspace. It joins sessions to give a second opinion, prefers deterministic tests, and writes short, broken-down components.',
 }
 
 function makeConclusion(
-  workspaceId: string,
+  id: string,
   observerId: string,
   observedId: string,
   sessionId: string,
@@ -202,7 +222,7 @@ function makeConclusion(
   createdAt: string,
 ): Conclusion {
   return {
-    id: `concl_demo_${workspaceId}_${observedId}_${content.length}_${createdAt}`,
+    id,
     content,
     observer_id: observerId,
     observed_id: observedId,
@@ -215,17 +235,70 @@ function makeConclusion(
   }
 }
 
-const conclusions: Conclusion[] = [
-  makeConclusion('test-1', 'hermes', 'alice', 'groupchat_1', 'explicit', 'Alice loves sci-fi novels.', '2025-08-25T13:52:00Z'),
-  makeConclusion('test-1', 'hermes', 'alice', 'groupchat_1', 'explicit', 'Alice proposed starting a book club with Bob and Charlie.', '2025-08-25T13:52:05Z'),
-  makeConclusion('test-1', 'hermes', 'alice', 'groupchat_1', 'deductive', 'Alice values Charlie\u2019s opinion despite their opposing genre tastes.', '2025-08-25T14:05:00Z'),
-  makeConclusion('test-1', 'hermes', 'bob', 'groupchat_1', 'explicit', 'Bob is reading a mystery novel he cannot put down.', '2025-08-25T13:52:10Z'),
-  makeConclusion('test-1', 'hermes', 'charlie', 'groupchat_1', 'explicit', 'Charlie considers sci-fi his least favorite genre.', '2025-08-25T13:52:15Z'),
-  makeConclusion('test-1', 'hermes', 'charlie', 'groupchat_1', 'explicit', 'Charlie prefers historical fiction, especially sea voyage stories.', '2025-08-25T13:52:20Z'),
-  makeConclusion('hermes', 'hermes', 'radoslav', 'hermes-desktop', 'explicit', 'Radoslav runs Honcho against an existing Postgres LXC rather than a bundled database.', '2026-10-20T16:10:00Z'),
-  makeConclusion('hermes', 'hermes', 'radoslav', 'hermes-desktop', 'explicit', 'Radoslav prefers short, direct, evidence-backed answers.', '2026-10-20T16:10:05Z'),
-  makeConclusion('hermes', 'hermes', 'radoslav', 'evening-planning', 'explicit', 'Radoslav does not want proactive reminders about school tours.', '2026-10-26T02:50:00Z'),
+let conclusions: Conclusion[] = [
+  makeConclusion('concl_demo_test1_01', 'hermes', 'alice', 'groupchat_1', 'explicit', 'Alice loves sci-fi novels.', '2025-08-25T13:52:00Z'),
+  makeConclusion('concl_demo_test1_02', 'hermes', 'alice', 'groupchat_1', 'explicit', 'Alice proposed starting a book club with Bob and Charlie.', '2025-08-25T13:52:05Z'),
+  makeConclusion('concl_demo_test1_03', 'hermes', 'alice', 'groupchat_1', 'deductive', 'Alice values Charlie\u2019s opinion despite their opposing genre tastes.', '2025-08-25T14:05:00Z'),
+  makeConclusion('concl_demo_test1_04', 'hermes', 'bob', 'groupchat_1', 'explicit', 'Bob is reading a mystery novel he cannot put down.', '2025-08-25T13:52:10Z'),
+  makeConclusion('concl_demo_test1_05', 'hermes', 'charlie', 'groupchat_1', 'explicit', 'Charlie considers sci-fi his least favorite genre.', '2025-08-25T13:52:15Z'),
+  makeConclusion('concl_demo_test1_06', 'hermes', 'charlie', 'groupchat_1', 'explicit', 'Charlie prefers historical fiction, especially sea voyage stories.', '2025-08-25T13:52:20Z'),
+  ...buildTest1ExtraConclusions(),
+  makeConclusion('concl_demo_hermes_01', 'hermes', 'radoslav', 'hermes-desktop', 'explicit', 'Radoslav runs Honcho against an existing Postgres LXC rather than a bundled database.', '2026-10-20T16:10:00Z'),
+  makeConclusion('concl_demo_hermes_02', 'hermes', 'radoslav', 'hermes-desktop', 'explicit', 'Radoslav prefers short, direct, evidence-backed answers.', '2026-10-20T16:10:05Z'),
+  makeConclusion('concl_demo_hermes_03', 'hermes', 'radoslav', 'evening-planning', 'explicit', 'Radoslav does not want proactive reminders about school tours.', '2026-10-26T02:50:00Z'),
+  ...buildHermesConclusions(),
 ]
+
+const hermesMessages = buildHermesMessages()
+for (const [sessionId, generated] of Object.entries(hermesMessages)) {
+  const existing = messagesBySession[sessionId] ?? []
+  messagesBySession[sessionId] = [...generated, ...existing].sort((a, b) =>
+    a.created_at.localeCompare(b.created_at),
+  )
+}
+
+const scopesByWorkspace: Record<string, Scope[]> = {
+  'test-1': [
+    { id: 'book-club', metadata: {}, created_at: '2025-08-26T09:10:00Z' },
+  ],
+  hermes: [
+    { id: 'personal-memory', metadata: {}, created_at: '2026-10-21T10:00:00Z' },
+    { id: 'work-projects', metadata: {}, created_at: '2026-10-22T10:00:00Z' },
+  ],
+}
+
+const scopeSessions: Record<string, string[]> = {
+  'book-club': ['groupchat_1', 'groupchat_2'],
+  'personal-memory': ['hermes-desktop', 'evening-planning', 'family-logistics'],
+  'work-projects': ['infra-setup', 'learning-plan'],
+}
+
+const scopeStatuses: Record<string, ScopeStatus> = {
+  'book-club': {
+    backfill_status: {
+      groupchat_1: { state: 'completed', updated_at: '2025-08-26T09:12:00Z', docs_copied: 12 },
+      groupchat_2: { state: 'completed', updated_at: '2025-08-26T09:12:30Z', docs_copied: 2 },
+    },
+  },
+  'personal-memory': {
+    backfill_status: {
+      'hermes-desktop': { state: 'completed', updated_at: '2026-10-21T10:05:00Z', docs_copied: 16 },
+      'evening-planning': { state: 'pending', updated_at: '2026-10-26T03:00:00Z' },
+    },
+  },
+  'work-projects': { backfill_status: {} },
+}
+
+function workspaceSessionIds(workspaceId: string): Set<string> {
+  return new Set((sessionsByWorkspace[workspaceId] ?? []).map((session) => session.id))
+}
+
+function workspaceConclusions(workspaceId: string): Conclusion[] {
+  const sessionIds = workspaceSessionIds(workspaceId)
+  return conclusions.filter(
+    (entry) => entry.session_id !== null && sessionIds.has(entry.session_id),
+  )
+}
 
 function paginate<T>(items: T[], page: number, size: number): Page<T> {
   const start = (page - 1) * size
@@ -402,13 +475,141 @@ export class DemoHonchoApi implements HonchoApi {
     page = 1,
     size = 50,
   ): Promise<Page<Conclusion>> {
-    const matching = conclusions.filter(
-      (entry) => entry.observed_id === peerId && entry.session_id !== null,
+    return this.listConclusions(workspaceId, { observed_id: peerId }, page, size)
+  }
+
+  async listConclusions(
+    workspaceId: string,
+    filters: ConclusionFilters = {},
+    page = 1,
+    size = 50,
+  ): Promise<Page<Conclusion>> {
+    const matching = filterConclusions(workspaceConclusions(workspaceId), filters)
+    const sorted = [...matching].sort((a, b) => b.created_at.localeCompare(a.created_at))
+    return paginate(sorted, page, size)
+  }
+
+  private demoConclusionsCache = new Map<string, { at: number; value: CappedConclusions }>()
+
+  async fetchConclusionsCapped(
+    workspaceId: string,
+    filters: ConclusionFilters = {},
+  ): Promise<CappedConclusions> {
+    const key = `${workspaceId}|${JSON.stringify(filters)}`
+    const cached = this.demoConclusionsCache.get(key)
+    if (cached && Date.now() - cached.at < CONCLUSIONS_CACHE_MS) return cached.value
+    const value = await fetchCapped(async (page, size) =>
+      this.listConclusions(workspaceId, filters, page, size),
     )
-    const inWorkspace = matching.filter((entry) =>
-      (sessionsByWorkspace[workspaceId] ?? []).some((session) => session.id === entry.session_id),
+    this.demoConclusionsCache.set(key, { at: Date.now(), value })
+    return value
+  }
+
+  async getConclusion(_workspaceId: string, conclusionId: string): Promise<Conclusion> {
+    const found = conclusions.find((entry) => entry.id === conclusionId)
+    if (!found) throw new Error(`Conclusion ${conclusionId} not found (demo)`)
+    return found
+  }
+
+  // Deterministic lexical ranking stands in for semantic search in demo
+  // mode: score = number of query terms present in the content, ties
+  // broken by recency, then id — same output on every run.
+  async queryConclusions(
+    workspaceId: string,
+    query: string,
+    topK = 20,
+    filters: ConclusionFilters = {},
+  ): Promise<Conclusion[]> {
+    const terms = query.toLowerCase().split(/\s+/).filter((term) => term.length > 2)
+    const pool = filterConclusions(workspaceConclusions(workspaceId), filters)
+    const scored = pool
+      .map((entry) => {
+        const haystack = entry.content.toLowerCase()
+        let score = 0
+        for (const term of terms) if (haystack.includes(term)) score += 1
+        return { entry, score }
+      })
+      .filter((row) => row.score > 0)
+    scored.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score
+      const byDate = b.entry.created_at.localeCompare(a.entry.created_at)
+      if (byDate !== 0) return byDate
+      return a.entry.id.localeCompare(b.entry.id)
+    })
+    return scored.slice(0, topK).map((row) => row.entry)
+  }
+
+  async deleteConclusion(workspaceId: string, conclusionId: string): Promise<void> {
+    conclusions = conclusions.filter((entry) => entry.id !== conclusionId)
+    for (const key of [...this.demoConclusionsCache.keys()]) {
+      if (key.startsWith(`${workspaceId}|`)) this.demoConclusionsCache.delete(key)
+    }
+  }
+
+  async getWorkspaceCounts(workspaceId: string): Promise<WorkspaceCounts> {
+    const pool = workspaceConclusions(workspaceId)
+    const byLevel = {} as Record<ConclusionLevel, number>
+    for (const level of CONCLUSION_LEVELS) {
+      byLevel[level] = pool.filter((entry) => entry.level === level).length
+    }
+    return {
+      peers: (peersByWorkspace[workspaceId] ?? []).length,
+      sessions: (sessionsByWorkspace[workspaceId] ?? []).length,
+      conclusions: pool.length,
+      byLevel,
+    }
+  }
+
+  async chatWorkspace(workspaceId: string, query: string): Promise<WorkspaceChatResult> {
+    const evidenceConclusions = await this.queryConclusions(workspaceId, query, 3)
+    const evidenceMessages = searchMessages(
+      allMessages.filter((message) => message.workspace_id === workspaceId),
+      query.split(/\s+/)[0] ?? '',
+      3,
     )
-    return paginate(inWorkspace, page, size)
+    const names = (peersByWorkspace[workspaceId] ?? []).map((peer) => peer.id).join(', ')
+    return {
+      content:
+        `Demo answer — in a live connection the dialectic agent reasons over the whole workspace.\n\n` +
+        `You asked: "${query}"\n\n` +
+        `This workspace remembers ${workspaceConclusions(workspaceId).length} conclusions about: ${names}.`,
+      evidence: {
+        conclusions: evidenceConclusions.map((entry) => ({
+          id: entry.id,
+          level: entry.level,
+          content: entry.content,
+          created_at: entry.created_at,
+        })),
+        messages: evidenceMessages.map((message) => ({
+          id: message.id,
+          session_id: message.session_id,
+          peer_id: message.peer_id,
+          created_at: message.created_at,
+        })),
+        tool_calls: [{ name: 'conclusions_query', arguments: { query } }],
+      },
+    }
+  }
+
+  async listScopes(workspaceId: string, page = 1, size = 50): Promise<Page<Scope>> {
+    return paginate(scopesByWorkspace[workspaceId] ?? [], page, size)
+  }
+
+  async getScopeStatus(_workspaceId: string, scopeId: string): Promise<ScopeStatus> {
+    return scopeStatuses[scopeId] ?? { backfill_status: {} }
+  }
+
+  async listScopeSessions(
+    workspaceId: string,
+    scopeId: string,
+    page = 1,
+    size = 50,
+  ): Promise<Page<Session>> {
+    const ids = scopeSessions[scopeId] ?? []
+    const matching = (sessionsByWorkspace[workspaceId] ?? []).filter((session) =>
+      ids.includes(session.id),
+    )
+    return paginate(matching, page, size)
   }
 
   async listSessions(workspaceId: string, page = 1, size = 50): Promise<Page<Session>> {
@@ -509,12 +710,25 @@ export class DemoHonchoApi implements HonchoApi {
     )
   }
 
-  async getQueueStatus(_workspaceId: string): Promise<QueueStatus> {
+  async getQueueStatus(workspaceId: string): Promise<QueueStatus> {
+    const sessions: QueueStatus['sessions'] = {}
+    const sessionList = sessionsByWorkspace[workspaceId] ?? []
+    sessionList.forEach((session, index) => {
+      const total = 24 - index * 3
+      sessions[session.id] = {
+        session_id: session.id,
+        total_work_units: total,
+        completed_work_units: total - (index === 0 ? 1 : 0),
+        in_progress_work_units: index === 0 ? 1 : 0,
+        pending_work_units: index === 1 ? 1 : 0,
+      }
+    })
     return {
       total_work_units: 128,
       completed_work_units: 126,
       in_progress_work_units: 1,
       pending_work_units: 1,
+      sessions,
     }
   }
 }

@@ -1,5 +1,8 @@
 import type {
+  CappedConclusions,
   Conclusion,
+  ConclusionFilters,
+  ConclusionLevel,
   CreateKeyOptions,
   ExecuteResult,
   Message,
@@ -7,16 +10,25 @@ import type {
   Peer,
   QueueStatus,
   ReasoningLevel,
+  Scope,
+  ScopeStatus,
   Session,
   SessionContext,
   SessionSummaries,
   WebhookEndpoint,
   Workspace,
+  WorkspaceChatResult,
+  WorkspaceCounts,
 } from '../types'
 import type { HonchoApi } from './honchoApi'
 import type { OpenApiDoc } from './openapi'
 import { StatsCollector, type PerformanceStats } from '../lib/stats'
 import { ensureRecord, normalizePage } from '../lib/page'
+import {
+  CONCLUSION_LEVELS,
+  CONCLUSIONS_CACHE_MS,
+  fetchConclusionsCapped as fetchCapped,
+} from '../lib/conclusions'
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
 
@@ -421,12 +433,150 @@ export class HonchoClient implements HonchoApi {
     page = 1,
     size = 50,
   ): Promise<Page<Conclusion>> {
+    return this.listConclusions(workspaceId, { observed_id: peerId }, page, size)
+  }
+
+  async listConclusions(
+    workspaceId: string,
+    filters: ConclusionFilters = {},
+    page = 1,
+    size = 50,
+  ): Promise<Page<Conclusion>> {
     const raw = await this.request<unknown>(
       'POST',
       `/v3/workspaces/${workspaceId}/conclusions/list${this.pageQuery(page, size)}`,
-      { filters: { observed_id: peerId } },
+      { filters },
     )
     return normalizePage<Conclusion>(raw, page, size)
+  }
+
+  // In-memory 60s cache for capped conclusion sets, keyed by workspace +
+  // filters. Invalidated by writes (deleteConclusion). Never localStorage:
+  // conclusions are server data, not dashboard preferences.
+  private conclusionsCache = new Map<
+    string,
+    { at: number; value: CappedConclusions }
+  >()
+
+  private invalidateConclusionsCache(workspaceId: string): void {
+    for (const key of [...this.conclusionsCache.keys()]) {
+      if (key.startsWith(`${workspaceId}|`)) this.conclusionsCache.delete(key)
+    }
+  }
+
+  async fetchConclusionsCapped(
+    workspaceId: string,
+    filters: ConclusionFilters = {},
+  ): Promise<CappedConclusions> {
+    const key = `${workspaceId}|${JSON.stringify(filters)}`
+    const cached = this.conclusionsCache.get(key)
+    if (cached && Date.now() - cached.at < CONCLUSIONS_CACHE_MS) return cached.value
+    const value = await fetchCapped(async (page, size) =>
+      this.listConclusions(workspaceId, filters, page, size),
+    )
+    this.conclusionsCache.set(key, { at: Date.now(), value })
+    return value
+  }
+
+  async getConclusion(workspaceId: string, conclusionId: string): Promise<Conclusion> {
+    return this.request<Conclusion>(
+      'GET',
+      `/v3/workspaces/${workspaceId}/conclusions/${conclusionId}`,
+    )
+  }
+
+  async queryConclusions(
+    workspaceId: string,
+    query: string,
+    topK = 20,
+    filters: ConclusionFilters = {},
+  ): Promise<Conclusion[]> {
+    return this.request<Conclusion[]>(
+      'POST',
+      `/v3/workspaces/${workspaceId}/conclusions/query`,
+      { query, top_k: topK, filters },
+    )
+  }
+
+  async deleteConclusion(workspaceId: string, conclusionId: string): Promise<void> {
+    await this.request<unknown>(
+      'DELETE',
+      `/v3/workspaces/${workspaceId}/conclusions/${conclusionId}`,
+    )
+    this.invalidateConclusionsCache(workspaceId)
+  }
+
+  // Honest cheap counts: one size=1 list call per total (Page.total),
+  // plus one per conclusion level. No message fan-out anywhere.
+  async getWorkspaceCounts(workspaceId: string): Promise<WorkspaceCounts> {
+    const [peers, sessions, all] = await Promise.all([
+      this.listPeers(workspaceId, 1, 1),
+      this.listSessions(workspaceId, 1, 1),
+      this.listConclusions(workspaceId, {}, 1, 1),
+    ])
+    const byLevel = {} as Record<ConclusionLevel, number>
+    await Promise.all(
+      CONCLUSION_LEVELS.map(async (level) => {
+        const page = await this.listConclusions(workspaceId, { level }, 1, 1)
+        byLevel[level] = page.total
+      }),
+    )
+    return { peers: peers.total, sessions: sessions.total, conclusions: all.total, byLevel }
+  }
+
+  async chatWorkspace(
+    workspaceId: string,
+    query: string,
+    reasoningLevel: ReasoningLevel = 'low',
+  ): Promise<WorkspaceChatResult> {
+    const result = await this.request<{
+      content: string | null
+      evidence?: WorkspaceChatResult['evidence']
+    }>('POST', `/v3/workspaces/${workspaceId}/chat`, {
+      query,
+      reasoning_level: reasoningLevel,
+      stream: false,
+      include_evidence: true,
+    })
+    return { content: result.content, evidence: result.evidence ?? null }
+  }
+
+  async listScopes(workspaceId: string, page = 1, size = 50): Promise<Page<Scope>> {
+    const raw = await this.request<unknown>(
+      'POST',
+      `/v3/workspaces/${workspaceId}/scopes/list${this.pageQuery(page, size)}`,
+      {},
+    )
+    const normalized = normalizePage<Scope>(raw, page, size)
+    return {
+      ...normalized,
+      items: normalized.items.map((scope) => ({
+        ...scope,
+        metadata: ensureRecord(scope.metadata),
+      })),
+    }
+  }
+
+  async getScopeStatus(workspaceId: string, scopeId: string): Promise<ScopeStatus> {
+    return this.request<ScopeStatus>(
+      'GET',
+      `/v3/workspaces/${workspaceId}/scopes/${scopeId}/status`,
+    )
+  }
+
+  async listScopeSessions(
+    workspaceId: string,
+    scopeId: string,
+    page = 1,
+    size = 50,
+  ): Promise<Page<Session>> {
+    const raw = await this.request<unknown>(
+      'POST',
+      `/v3/workspaces/${workspaceId}/scopes/${scopeId}/sessions/list${this.pageQuery(page, size)}`,
+      {},
+    )
+    const normalized = normalizePage<Session>(raw, page, size)
+    return { ...normalized, items: normalized.items.map(normalizeSession) }
   }
 
   async listSessions(workspaceId: string, page = 1, size = 50): Promise<Page<Session>> {

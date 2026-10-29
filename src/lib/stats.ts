@@ -22,6 +22,10 @@ export interface PerformanceStats {
   totalCalls: number
   averageMs: number
   endpoints: EndpointStat[]
+  // When this collector started recording (epoch ms; 0 for pure aggregates).
+  startedAt: number
+  // True once the ring buffer has wrapped and old records were dropped.
+  ringCapped: boolean
 }
 
 const RESOURCE_NOUNS: Record<string, string> = {
@@ -73,27 +77,52 @@ export function aggregateStats(records: PerfRecord[]): PerformanceStats {
     totalCalls,
     averageMs: totalCalls === 0 ? 0 : totalMs / totalCalls,
     endpoints,
+    startedAt: 0,
+    ringCapped: false,
   }
 }
 
+// Ring cap: the collector keeps at most this many records so a long-lived
+// dashboard session cannot grow memory without bound.
+export const STATS_RING_CAP = 1000
+
 export class StatsCollector {
   private records: PerfRecord[] = []
+  private readonly startedAt: number
+  private dropped = 0
+
+  constructor(startedAt: number = Date.now()) {
+    this.startedAt = startedAt
+  }
+
+  private push(record: PerfRecord): void {
+    this.records.push(record)
+    if (this.records.length > STATS_RING_CAP) {
+      this.records.splice(0, this.records.length - STATS_RING_CAP)
+      this.dropped += 1
+    }
+  }
 
   record(method: string, path: string, status: number, durationMs: number): void {
-    this.records.push({ method, label: endpointLabel(method, path), status, durationMs })
+    this.push({ method, label: endpointLabel(method, path), status, durationMs })
   }
 
   recordLabel(label: string, status: number, durationMs: number): void {
     const method = label.split(' ')[0] ?? 'GET'
-    this.records.push({ method, label, status, durationMs })
+    this.push({ method, label, status, durationMs })
   }
 
   snapshot(): PerformanceStats {
-    return aggregateStats(this.records)
+    return {
+      ...aggregateStats(this.records),
+      startedAt: this.startedAt,
+      ringCapped: this.dropped > 0,
+    }
   }
 
   clear(): void {
     this.records = []
+    this.dropped = 0
   }
 }
 

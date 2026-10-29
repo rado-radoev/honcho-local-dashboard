@@ -86,11 +86,93 @@ export interface SessionContext {
   peer_card: string[] | null
 }
 
+export interface SessionQueueStatus {
+  session_id: string | null
+  total_work_units: number
+  completed_work_units: number
+  in_progress_work_units: number
+  pending_work_units: number
+}
+
 export interface QueueStatus {
   total_work_units: number
   completed_work_units: number
   in_progress_work_units: number
   pending_work_units: number
+  // Per-session breakdown, present when the status is not filtered to one
+  // session (spec: QueueStatus.sessions, keyed by session id).
+  sessions?: Record<string, SessionQueueStatus> | null
+}
+
+// Filters accepted by POST /v3/workspaces/{id}/conclusions/list.
+export interface ConclusionFilters {
+  level?: ConclusionLevel
+  observer_id?: string
+  observed_id?: string
+  session_id?: string
+}
+
+// Result of the capped conclusions fetch: `items` holds at most the cap,
+// `total` is the server's honest total, `capped` drives the
+// "latest N of M" label in the UI.
+export interface CappedConclusions {
+  items: Conclusion[]
+  total: number
+  capped: boolean
+}
+
+// Cheap honest counts for one workspace, from size=1 Page.total calls.
+export interface WorkspaceCounts {
+  peers: number
+  sessions: number
+  conclusions: number
+  byLevel: Record<ConclusionLevel, number>
+}
+
+// Evidence returned by workspace chat when include_evidence is true
+// (spec: Evidence / EvidenceObservation / EvidenceMessageRef).
+export interface ChatEvidenceConclusion {
+  id: string
+  level: ConclusionLevel
+  content: string
+  created_at?: string
+}
+
+export interface ChatEvidenceMessageRef {
+  id: string
+  session_id: string
+  peer_id: string
+  created_at?: string
+}
+
+export interface ChatEvidence {
+  conclusions: ChatEvidenceConclusion[]
+  messages: ChatEvidenceMessageRef[]
+  tool_calls: Array<Record<string, unknown>>
+}
+
+export interface WorkspaceChatResult {
+  content: string | null
+  evidence: ChatEvidence | null
+}
+
+// Scope (spec: Scope) — the external view of the peer backing a scope;
+// `id` is the unprefixed scope name.
+export interface Scope {
+  id: string
+  metadata: Record<string, unknown>
+  created_at: string
+}
+
+export interface ScopeBackfillEntry {
+  state: string
+  updated_at?: string
+  docs_copied?: number
+}
+
+// Scope status (spec: ScopeStatus): per-session backfill job states.
+export interface ScopeStatus {
+  backfill_status: Record<string, ScopeBackfillEntry>
 }
 
 export interface WebhookEndpoint {

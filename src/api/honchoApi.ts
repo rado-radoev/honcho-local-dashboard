@@ -1,5 +1,7 @@
 import type {
+  CappedConclusions,
   Conclusion,
+  ConclusionFilters,
   CreateKeyOptions,
   ExecuteResult,
   Message,
@@ -7,11 +9,15 @@ import type {
   Peer,
   QueueStatus,
   ReasoningLevel,
+  Scope,
+  ScopeStatus,
   Session,
   SessionContext,
   SessionSummaries,
   WebhookEndpoint,
   Workspace,
+  WorkspaceChatResult,
+  WorkspaceCounts,
 } from '../types'
 import type { OpenApiDoc } from './openapi'
 import type { PerformanceStats } from '../lib/stats'
@@ -40,6 +46,36 @@ export interface HonchoApi {
     page?: number,
     size?: number,
   ): Promise<Page<Conclusion>>
+  // Round 3: generic conclusions access (list with filters, capped fetch
+  // with a 60s in-memory cache, single get, semantic query, delete).
+  listConclusions(
+    workspaceId: string,
+    filters?: ConclusionFilters,
+    page?: number,
+    size?: number,
+  ): Promise<Page<Conclusion>>
+  fetchConclusionsCapped(
+    workspaceId: string,
+    filters?: ConclusionFilters,
+  ): Promise<CappedConclusions>
+  getConclusion(workspaceId: string, conclusionId: string): Promise<Conclusion>
+  queryConclusions(
+    workspaceId: string,
+    query: string,
+    topK?: number,
+    filters?: ConclusionFilters,
+  ): Promise<Conclusion[]>
+  deleteConclusion(workspaceId: string, conclusionId: string): Promise<void>
+  getWorkspaceCounts(workspaceId: string): Promise<WorkspaceCounts>
+  chatWorkspace(
+    workspaceId: string,
+    query: string,
+    reasoningLevel?: ReasoningLevel,
+  ): Promise<WorkspaceChatResult>
+  // Scopes (read-only browser).
+  listScopes(workspaceId: string, page?: number, size?: number): Promise<Page<Scope>>
+  getScopeStatus(workspaceId: string, scopeId: string): Promise<ScopeStatus>
+  listScopeSessions(workspaceId: string, scopeId: string, page?: number, size?: number): Promise<Page<Session>>
   listSessions(workspaceId: string, page?: number, size?: number): Promise<Page<Session>>
   createSession(workspaceId: string, id: string): Promise<Session>
   addPeersToSession(
