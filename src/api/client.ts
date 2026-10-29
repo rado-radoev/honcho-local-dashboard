@@ -62,6 +62,36 @@ function stripTrailingSlash(url: string): string {
   return url.replace(/\/+$/, '')
 }
 
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]'])
+
+function isLoopbackHost(hostname: string): boolean {
+  return LOOPBACK_HOSTS.has(hostname.toLowerCase())
+}
+
+function parseUrl(value: string): URL | null {
+  try {
+    return new URL(value)
+  } catch {
+    return null
+  }
+}
+
+function effectivePort(url: URL): string {
+  if (url.port) return url.port
+  if (url.protocol === 'http:') return '80'
+  if (url.protocol === 'https:') return '443'
+  return ''
+}
+
+function isLoopbackEquivalent(baseUrl: string, proxyTarget: string): boolean {
+  const base = parseUrl(baseUrl)
+  const target = parseUrl(proxyTarget)
+  if (!base || !target) return false
+  if (!isLoopbackHost(base.hostname)) return false
+  if (!isLoopbackHost(target.hostname)) return false
+  return effectivePort(base) === effectivePort(target)
+}
+
 // Decides where requests actually go.
 // - When the bundle may use the proxy (dev / preview builds — see
 //   shouldUseProxy) and the configured server IS the proxy target, requests
@@ -72,7 +102,13 @@ function stripTrailingSlash(url: string): string {
 export function resolveRequestBase(options: HonchoClientOptions): string {
   const base = stripTrailingSlash(options.baseUrl)
   const target = stripTrailingSlash(options.proxyTarget ?? DEFAULT_PROXY_TARGET)
-  if (options.useProxy && base === target) {
+  if (!options.useProxy) {
+    return base
+  }
+  if (base === target) {
+    return PROXY_PREFIX
+  }
+  if (isLoopbackEquivalent(base, target)) {
     return PROXY_PREFIX
   }
   return base

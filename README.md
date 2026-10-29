@@ -63,11 +63,17 @@ The Honcho API does not reliably emit CORS headers for browser apps, so
 calling it directly from a page served on another origin can be blocked by
 the browser. This project handles that locally with Vite's proxy
 (`/honcho-api` → `VITE_HONCHO_TARGET`, default `http://localhost:8000`),
-used **when the server you connect to is the proxy target**. Copy
-`.env.example` to `.env` and set `VITE_HONCHO_TARGET` if your server lives
-elsewhere, then connect using that same URL. Whether a given build may use
-the proxy is decided by its Vite mode (`shouldUseProxy` in
-`src/api/client.ts`):
+used **when the server you connect to matches the proxy target**. For
+loopback servers the host spelling does not need to match exactly:
+`localhost`, `127.0.0.1`, `0.0.0.0`, and `[::1]` are treated as equivalent
+as long as the port is the same — so connecting to
+`http://127.0.0.1:8000` still uses the proxy when `VITE_HONCHO_TARGET` is
+`http://localhost:8000` (and vice versa). Non-loopback hosts and loopback
+URLs with a different port are called directly. Copy `.env.example` to
+`.env` and set `VITE_HONCHO_TARGET` if your server lives elsewhere, then
+connect using that URL (or an equivalent loopback spelling on the same
+port). Whether a given build may use the proxy is decided by its Vite mode
+(`shouldUseProxy` in `src/api/client.ts`):
 
 - **Dev** (`npm run dev`, mode `development`): the dev server proxies
   `/honcho-api`, and the client uses it.

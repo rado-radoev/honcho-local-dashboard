@@ -53,6 +53,60 @@ describe('resolveRequestBase', () => {
     })
     expect(base).toBe('http://localhost:8000')
   })
+
+  it('uses the proxy when base is localhost and target is 127.0.0.1 (same port)', () => {
+    const base = resolveRequestBase({
+      baseUrl: 'http://localhost:8000',
+      proxyTarget: 'http://127.0.0.1:8000',
+      useProxy: true,
+    })
+    expect(base).toBe('/honcho-api')
+  })
+
+  it('uses the proxy when base is 127.0.0.1 and target is localhost (same port)', () => {
+    const base = resolveRequestBase({
+      baseUrl: 'http://127.0.0.1:8000',
+      proxyTarget: 'http://localhost:8000',
+      useProxy: true,
+    })
+    expect(base).toBe('/honcho-api')
+  })
+
+  it('uses the proxy when base is 0.0.0.0 and target is localhost (same port)', () => {
+    const base = resolveRequestBase({
+      baseUrl: 'http://0.0.0.0:8000',
+      proxyTarget: 'http://localhost:8000',
+      useProxy: true,
+    })
+    expect(base).toBe('/honcho-api')
+  })
+
+  it('uses the proxy when base is [::1] and target is localhost (same port)', () => {
+    const base = resolveRequestBase({
+      baseUrl: 'http://[::1]:8000',
+      proxyTarget: 'http://localhost:8000',
+      useProxy: true,
+    })
+    expect(base).toBe('/honcho-api')
+  })
+
+  it('calls loopback directly when ports differ', () => {
+    const base = resolveRequestBase({
+      baseUrl: 'http://127.0.0.1:9000',
+      proxyTarget: 'http://localhost:8000',
+      useProxy: true,
+    })
+    expect(base).toBe('http://127.0.0.1:9000')
+  })
+
+  it('calls loopback directly when ports differ (localhost vs 127.0.0.1)', () => {
+    const base = resolveRequestBase({
+      baseUrl: 'http://localhost:9000',
+      proxyTarget: 'http://127.0.0.1:8000',
+      useProxy: true,
+    })
+    expect(base).toBe('http://localhost:9000')
+  })
 })
 
 describe('shouldUseProxy', () => {
