@@ -121,7 +121,7 @@ describe('HonchoClient round-3 methods', () => {
 
   it('fetchConclusionsCapped caches for 60s and deleteConclusion invalidates', async () => {
     let listCalls = 0
-    const { client } = clientWith((url, init) => {
+    const { client } = clientWith((_url, init) => {
       if (init.method === 'DELETE') return {}
       listCalls += 1
       return {
