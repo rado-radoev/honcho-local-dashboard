@@ -212,9 +212,12 @@ async function waitForPreviewServer() {
 async function main() {
   await mkdir(OUTPUT_DIR, { recursive: true })
 
+  // detached + process-group kill: killing the npx wrapper alone
+  // leaves the vite child serving a stale build on the port.
   const preview = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], {
     cwd: new URL('..', import.meta.url).pathname,
     stdio: 'ignore',
+    detached: true,
   })
 
   const pageErrors = []
@@ -259,7 +262,11 @@ async function main() {
 
     await browser.close()
   } finally {
-    preview.kill()
+    try {
+      process.kill(-preview.pid, 'SIGKILL')
+    } catch {
+      preview.kill()
+    }
   }
 
   if (pageErrors.length > 0) {

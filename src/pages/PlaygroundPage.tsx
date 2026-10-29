@@ -19,12 +19,12 @@ import { ErrorBox, PageHeader, Spinner } from '../components/ui'
 import {
   buildFormModel,
   initialFormValues,
-  parameterOptions,
   parseRawToForm,
   serializeBody,
   type BodyFormModel,
   type SerializeResult,
 } from '../lib/schemaForm'
+import { ParameterInput } from '../components/ParameterInput'
 import { SchemaBodyForm } from '../components/SchemaBodyForm'
 import type { ExecuteResult } from '../types'
 
@@ -331,54 +331,21 @@ export function PlaygroundPage() {
                   const param = selected.parameters.find(
                     (entry) => entry.in === 'path' && entry.name === name,
                   )
-                  const paramSchema = param?.schema
-                  const enumValues =
-                    paramSchema && Array.isArray(paramSchema.enum)
-                      ? (paramSchema.enum as unknown[]).map(String)
-                      : []
-                  const suggestions = [
-                    ...parameterOptions(paramSchema),
-                    ...(name === 'workspace_id' ? workspaceIds : []),
-                  ]
-                  const uniqueSuggestions = [...new Set(suggestions)]
-                  const setValue = (value: string) =>
-                    setPathValues((current) => ({ ...current, [name]: value }))
-                  if (enumValues.length > 0) {
-                    return (
-                      <select
-                        key={index}
-                        aria-label={`Path parameter ${name}`}
-                        value={pathValues[name] ?? ''}
-                        onChange={(event) => setValue(event.target.value)}
-                        className="w-36 border-b border-fog bg-transparent px-1 text-badge outline-none"
-                      >
-                        <option value="">{name}</option>
-                        {enumValues.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    )
-                  }
                   return (
-                    <span key={index} className="inline-flex">
-                      <input
-                        aria-label={`Path parameter ${name}`}
-                        value={pathValues[name] ?? ''}
-                        onChange={(event) => setValue(event.target.value)}
-                        placeholder={name}
-                        list={uniqueSuggestions.length > 0 ? `path-options-${name}` : undefined}
-                        className="w-36 border-b border-fog bg-transparent px-1 text-badge outline-none"
-                      />
-                      {uniqueSuggestions.length > 0 ? (
-                        <datalist id={`path-options-${name}`}>
-                          {uniqueSuggestions.map((option) => (
-                            <option key={option} value={option} />
-                          ))}
-                        </datalist>
-                      ) : null}
-                    </span>
+                    <ParameterInput
+                      key={index}
+                      variant="inline"
+                      name={name}
+                      ariaLabel={`Path parameter ${name}`}
+                      schema={param?.schema}
+                      extraSuggestions={name === 'workspace_id' ? workspaceIds : []}
+                      value={pathValues[name] ?? ''}
+                      onChange={(value) =>
+                        setPathValues((current) => ({ ...current, [name]: value }))
+                      }
+                      placeholder={name}
+                      listId={`path-options-${name}`}
+                    />
                   )
                 })}
               </div>
@@ -410,12 +377,16 @@ export function PlaygroundPage() {
                       {param.name}
                       {param.required ? ' *' : ''}
                     </span>
-                    <input
+                    <ParameterInput
+                      variant="field"
+                      name={param.name}
+                      ariaLabel={`Query parameter ${param.name}`}
+                      schema={param.schema}
                       value={queryValues[param.name] ?? ''}
-                      onChange={(event) =>
-                        setQueryValues((current) => ({ ...current, [param.name]: event.target.value }))
+                      onChange={(value) =>
+                        setQueryValues((current) => ({ ...current, [param.name]: value }))
                       }
-                      className="w-full max-w-sm rounded-md border border-line bg-panel px-3 py-2 text-sm text-mist outline-none focus:border-fog"
+                      listId={`query-options-${param.name}`}
                     />
                   </label>
                 ))}

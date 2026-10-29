@@ -475,3 +475,27 @@ export function parameterOptions(schema: Record<string, unknown> | undefined): s
   }
   return options
 }
+
+export interface ParameterInputSpec {
+  /** 'select' for enum parameters (a closed set), 'input' otherwise. */
+  mode: 'select' | 'input'
+  /** Enum values in select mode; datalist suggestions in input mode. */
+  options: string[]
+}
+
+// How ONE Playground parameter (path or query — both render through
+// this) should be presented: an enum schema becomes a dropdown of its
+// values; anything else stays free text, with the schema's examples
+// plus any caller-supplied suggestions (e.g. live workspace ids for
+// workspace_id) offered as a deduped datalist. Free text is always
+// preserved where the spec does not close the set.
+export function parameterInputSpec(
+  schema: Record<string, unknown> | undefined,
+  extraSuggestions: string[] = [],
+): ParameterInputSpec {
+  if (schema && Array.isArray(schema.enum) && schema.enum.length > 0) {
+    return { mode: 'select', options: (schema.enum as unknown[]).map(String) }
+  }
+  const options = [...new Set([...parameterOptions(schema), ...extraSuggestions])]
+  return { mode: 'input', options }
+}

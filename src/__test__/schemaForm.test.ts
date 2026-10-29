@@ -5,6 +5,7 @@ import {
   buildFormModel,
   initialFormValues,
   normalizeSchema,
+  parameterInputSpec,
   parameterOptions,
   parseRawToForm,
   resolveSchemaRef,
@@ -275,5 +276,39 @@ describe('parameterOptions', () => {
     expect(parameterOptions({ examples: ['x', 'y'] })).toEqual(['x', 'y'])
     expect(parameterOptions({ type: 'string' })).toEqual([])
     expect(parameterOptions(undefined)).toEqual([])
+  })
+})
+
+describe('parameterInputSpec', () => {
+  it('renders an enum parameter as a select of its values (path and query alike)', () => {
+    expect(parameterInputSpec({ enum: ['asc', 'desc'] })).toEqual({
+      mode: 'select',
+      options: ['asc', 'desc'],
+    })
+    // Non-string enum values are stringified for the dropdown.
+    expect(parameterInputSpec({ enum: [1, 2] })).toEqual({ mode: 'select', options: ['1', '2'] })
+    // Extra suggestions never widen a closed enum set.
+    expect(parameterInputSpec({ enum: ['a'] }, ['extra'])).toEqual({
+      mode: 'select',
+      options: ['a'],
+    })
+  })
+
+  it('keeps non-enum parameters as free-text inputs with example suggestions', () => {
+    expect(parameterInputSpec({ example: 'ex-1' })).toEqual({ mode: 'input', options: ['ex-1'] })
+    expect(parameterInputSpec({ examples: ['x', 'y'] })).toEqual({
+      mode: 'input',
+      options: ['x', 'y'],
+    })
+    expect(parameterInputSpec({ type: 'string' })).toEqual({ mode: 'input', options: [] })
+    expect(parameterInputSpec(undefined)).toEqual({ mode: 'input', options: [] })
+  })
+
+  it('merges caller suggestions into the datalist, deduped', () => {
+    expect(parameterInputSpec({ example: 'ws-1' }, ['ws-1', 'ws-2'])).toEqual({
+      mode: 'input',
+      options: ['ws-1', 'ws-2'],
+    })
+    expect(parameterInputSpec(undefined, ['ws-1'])).toEqual({ mode: 'input', options: ['ws-1'] })
   })
 })
