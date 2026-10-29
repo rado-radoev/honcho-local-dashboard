@@ -195,6 +195,65 @@ describe('Work Item 5 audit — live-shaped payloads', () => {
     expect(result.items[0].configuration).toEqual({})
   })
 
+  it('listSessionsForPeer requests ?page=1&size=50', async () => {
+    const fetchFn = recordingFetch(jsonResponse({ items: [], total: 0, page: 1, size: 50, pages: 0 }))
+    const client = new HonchoClient({ baseUrl: 'http://honcho.local:8000', fetchFn })
+    await client.listSessionsForPeer('hermes', 'alice')
+    const [url, init] = calls(fetchFn)[0]
+    expect(url).toBe('http://honcho.local:8000/v3/workspaces/hermes/peers/alice/sessions?page=1&size=50')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({})
+  })
+
+  it('missing/null metadata/configuration are coerced to {} for peers', async () => {
+    const missing = { id: 'alice', uid: 'p1', workspace_id: 'hermes', created_at: '2026-10-19T09:13:03Z' }
+    const nulled = {
+      id: 'bob',
+      uid: 'p2',
+      workspace_id: 'hermes',
+      created_at: '2026-10-19T09:13:04Z',
+      metadata: null,
+      configuration: null,
+    }
+    const fetchFn = recordingFetch(
+      jsonResponse({ items: [missing, nulled], total: 2, page: 1, size: 50, pages: 1 }),
+    )
+    const client = new HonchoClient({ baseUrl: 'http://honcho.local:8000', fetchFn })
+    const result = await client.listPeers('hermes')
+    expect(result.items[0].metadata).toEqual({})
+    expect(result.items[0].configuration).toEqual({})
+    expect(result.items[1].metadata).toEqual({})
+    expect(result.items[1].configuration).toEqual({})
+  })
+
+  it('missing/null metadata/configuration are coerced to {} for sessions', async () => {
+    const missing = {
+      id: 's-missing',
+      uid: 's1',
+      is_active: true,
+      workspace_id: 'hermes',
+      created_at: '2026-10-20T16:02:11Z',
+    }
+    const nulled = {
+      id: 's-null',
+      uid: 's2',
+      is_active: false,
+      workspace_id: 'hermes',
+      created_at: '2026-10-20T16:02:12Z',
+      metadata: null,
+      configuration: null,
+    }
+    const fetchFn = recordingFetch(
+      jsonResponse({ items: [missing, nulled], total: 2, page: 1, size: 50, pages: 1 }),
+    )
+    const client = new HonchoClient({ baseUrl: 'http://honcho.local:8000', fetchFn })
+    const result = await client.listSessions('hermes')
+    expect(result.items[0].metadata).toEqual({})
+    expect(result.items[0].configuration).toEqual({})
+    expect(result.items[1].metadata).toEqual({})
+    expect(result.items[1].configuration).toEqual({})
+  })
+
   it('normalizePage handles Page, CursorPage and items-only bodies', () => {
     expect(normalizePage({ items: [1, 2], total: 2, page: 1, size: 50, pages: 1 })).toEqual({
       items: [1, 2], total: 2, page: 1, size: 50, pages: 1,
@@ -395,6 +454,14 @@ describe('demo mode writes + canned execute', () => {
     const result = await demo.execute('GET', '/health')
     expect(result.isDemo).toBe(true)
     expect(result.bodyText).toContain('Demo mode')
+  })
+
+  it('demo serverVersion matches the bundled spec version', async () => {
+    const demo = new DemoHonchoApi()
+    const spec = await demo.fetchSpec()
+    expect(spec.info?.version).toBe('3.4.1')
+    expect(await demo.serverVersion()).toBe('3.4.1 (demo)')
+    expect(await demo.serverVersion()).toBe(`${spec.info?.version} (demo)`)
   })
 
   it('demo key is clearly fake; demo stats are seeded; demo spec parses', async () => {

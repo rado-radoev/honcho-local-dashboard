@@ -239,16 +239,45 @@ export class HonchoClient implements HonchoApi {
     }
 
     if (!response.ok) {
-      let parsed: unknown = null
-      try {
-        parsed = await response.json()
-      } catch {
-        parsed = null
+      const fallback = `Honcho request failed with HTTP ${response.status}`
+      let message = fallback
+      let bodyText = ''
+      let hasText = false
+      if (typeof response.text === 'function') {
+        try {
+          bodyText = await response.text()
+          hasText = true
+        } catch {
+          hasText = false
+        }
       }
-      throw new HonchoError(
-        response.status,
-        describeErrorBody(parsed, `Honcho request failed with HTTP ${response.status}`),
-      )
+      if (hasText) {
+        const trimmed = bodyText.trim()
+        if (trimmed.length > 0) {
+          let parsed: unknown = null
+          let isJson = false
+          try {
+            parsed = JSON.parse(bodyText)
+            isJson = true
+          } catch {
+            isJson = false
+          }
+          if (isJson) {
+            message = describeErrorBody(parsed, fallback)
+          } else {
+            message = `${fallback}: ${trimmed.slice(0, 200)}`
+          }
+        }
+      } else {
+        let parsed: unknown = null
+        try {
+          parsed = await response.json()
+        } catch {
+          parsed = null
+        }
+        message = describeErrorBody(parsed, fallback)
+      }
+      throw new HonchoError(response.status, message)
     }
 
     if (response.status === 204) return undefined as T

@@ -32,6 +32,7 @@ export function PerformancePage() {
         icon={<BarChart3 className="h-6 w-6" />}
         title="Performance"
         subtitle="Monitor your API performance metrics and usage analytics"
+        backRoute={{ name: 'get-started' }}
       />
 
       <div className="mb-2 flex flex-wrap items-center gap-3">

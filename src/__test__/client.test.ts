@@ -275,6 +275,25 @@ describe('HonchoClient', () => {
     })
   })
 
+  it('surfaces a non-JSON error body text in the HonchoError message', async () => {
+    const response = {
+      ok: false,
+      status: 502,
+      text: async () => 'Bad Gateway — proxy error',
+      json: async () => {
+        throw new Error('not json')
+      },
+    } as unknown as Response
+    const fetchFn = mockFetch(response)
+    const client = new HonchoClient({ baseUrl: 'http://honcho.local:8000', fetchFn })
+
+    const caught = await client.health().catch((error: unknown) => error)
+    expect(caught).toBeInstanceOf(HonchoError)
+    expect((caught as HonchoError).status).toBe(502)
+    expect((caught as HonchoError).message).toContain('Bad Gateway — proxy error')
+    expect((caught as HonchoError).message).toContain('502')
+  })
+
   it('turns a network failure into a HonchoError with status 0', async () => {
     const fetchFn = vi.fn(async () => {
       throw new Error('connection refused')

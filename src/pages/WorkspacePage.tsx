@@ -233,7 +233,7 @@ export function WorkspacePage({ workspaceId }: { workspaceId: string }) {
                         aria-label={`Select peer ${peer.id}`}
                         checked={selectedPeers.has(peer.id)}
                         onChange={() => togglePeer(peer.id)}
-                        className="h-4 w-4 accent-[#bcd6ff]"
+                        className="peer-checkbox"
                       />
                     </td>
                   </tr>

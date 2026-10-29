@@ -263,7 +263,9 @@ export class DemoHonchoApi implements HonchoApi {
   }
 
   async serverVersion(): Promise<string | null> {
-    return '3.0.0 (demo)'
+    const version = demoSpec.info?.version
+    if (!version) return null
+    return `${version} (demo)`
   }
 
   async listWorkspaces(page = 1, size = 50): Promise<Page<Workspace>> {

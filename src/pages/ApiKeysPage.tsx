@@ -5,6 +5,12 @@ import { ErrorBox, PageHeader } from '../components/ui'
 import { dialogInputClass, dialogLabelClass, primaryButtonClass } from '../components/Dialog'
 import type { CreateKeyOptions } from '../types'
 
+function formatCreatedKey(created: unknown): string {
+  if (typeof created === 'string') return created
+  if (created === null) return ''
+  return JSON.stringify(created, null, 2)
+}
+
 // API Keys — create-only, because that is all the self-hosted v3 API
 // offers: POST /v3/keys (scope via query params) exists, but there is NO
 // list or revoke endpoint, so a created key is shown exactly once here
@@ -44,8 +50,7 @@ export function ApiKeysPage() {
     setCreating(false)
   }
 
-  const createdText =
-    typeof created === 'string' ? created : created === null ? '' : JSON.stringify(created, null, 2)
+  const createdText = formatCreatedKey(created)
 
   async function copyCreated() {
     try {
