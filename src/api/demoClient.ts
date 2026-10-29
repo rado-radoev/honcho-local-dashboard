@@ -9,6 +9,12 @@ import type {
   Workspace,
 } from '../types'
 import type { HonchoApi } from './honchoApi'
+import type { CreateKeyOptions, ExecuteResult, WebhookEndpoint } from '../types'
+import type { OpenApiDoc } from './openapi'
+import { StatsCollector, seedDemoStats, type PerformanceStats } from '../lib/stats'
+import demoSpecJson from './demoOpenApi.json'
+
+const demoSpec = demoSpecJson as unknown as OpenApiDoc
 
 // Fixture implementation of the Honcho API used by demo mode. The sample
 // workspace mirrors the one in Honcho's official dashboard screenshots
@@ -16,7 +22,7 @@ import type { HonchoApi } from './honchoApi'
 // "hermes" workspace resembling a personal Hermes Agent setup. All data is
 // invented sample data — nothing here comes from a real server.
 
-const workspaces: Workspace[] = [
+let workspaces: Workspace[] = [
   {
     id: 'test-1',
     uid: 'ws_demo_test1',
@@ -85,6 +91,20 @@ const sessionPeers: Record<string, string[]> = {
   'hermes-desktop': ['radoslav', 'hermes'],
   'evening-planning': ['radoslav', 'hermes'],
 }
+
+const webhooksByWorkspace: Record<string, WebhookEndpoint[]> = {
+  'test-1': [
+    {
+      id: 'wh_demo_1',
+      workspace_id: 'test-1',
+      url: 'https://example.com/honcho-hook',
+      created_at: '2025-08-25T13:30:00Z',
+    },
+  ],
+  hermes: [],
+}
+let webhookCounter = 1
+let demoKeyCounter = 0
 
 let messageCounter = 0
 function makeMessage(
@@ -228,6 +248,12 @@ function searchMessages(pool: Message[], query: string, limit: number): Message[
 const allMessages: Message[] = Object.values(messagesBySession).flat()
 
 export class DemoHonchoApi implements HonchoApi {
+  private readonly stats = (() => {
+    const collector = new StatsCollector()
+    seedDemoStats(collector)
+    return collector
+  })()
+
   routeDescription(): string {
     return 'demo fixtures (no server request)'
   }
@@ -242,6 +268,118 @@ export class DemoHonchoApi implements HonchoApi {
 
   async listWorkspaces(page = 1, size = 50): Promise<Page<Workspace>> {
     return paginate(workspaces, page, size)
+  }
+
+  async createWorkspace(id: string): Promise<Workspace> {
+    const existing = workspaces.find((workspace) => workspace.id === id)
+    if (existing) return existing
+    const created: Workspace = {
+      id,
+      uid: `ws_demo_${id}`,
+      metadata: {},
+      configuration: {},
+      created_at: '2026-10-29T07:00:00Z',
+    }
+    workspaces = [...workspaces, created]
+    peersByWorkspace[id] = []
+    sessionsByWorkspace[id] = []
+    return created
+  }
+
+  async updateWorkspace(
+    workspaceId: string,
+    update: { metadata?: Record<string, unknown>; configuration?: Record<string, unknown> },
+  ): Promise<Workspace> {
+    const found = workspaces.find((workspace) => workspace.id === workspaceId)
+    if (!found) throw new Error(`Workspace ${workspaceId} not found (demo)`)
+    if (update.metadata !== undefined) found.metadata = update.metadata
+    if (update.configuration !== undefined) found.configuration = update.configuration
+    return found
+  }
+
+  async getWorkspace(workspaceId: string): Promise<Workspace | null> {
+    return workspaces.find((workspace) => workspace.id === workspaceId) ?? null
+  }
+
+  async createPeer(workspaceId: string, id: string): Promise<Peer> {
+    const list = peersByWorkspace[workspaceId] ?? []
+    const existing = list.find((peer) => peer.id === id)
+    if (existing) return existing
+    const created = makePeer(workspaceId, id, '2026-10-29T07:00:00Z')
+    peersByWorkspace[workspaceId] = [...list, created]
+    return created
+  }
+
+  async createSession(workspaceId: string, id: string): Promise<Session> {
+    const list = sessionsByWorkspace[workspaceId] ?? []
+    const existing = list.find((session) => session.id === id)
+    if (existing) return existing
+    const created = makeSession(workspaceId, id, '2026-10-29T07:00:00Z', true)
+    sessionsByWorkspace[workspaceId] = [...list, created]
+    sessionPeers[id] = []
+    return created
+  }
+
+  async addPeersToSession(
+    workspaceId: string,
+    sessionId: string,
+    peerIds: string[],
+  ): Promise<Session> {
+    const current = sessionPeers[sessionId] ?? []
+    sessionPeers[sessionId] = [...new Set([...current, ...peerIds])]
+    const session = (sessionsByWorkspace[workspaceId] ?? []).find((entry) => entry.id === sessionId)
+    if (!session) throw new Error(`Session ${sessionId} not found (demo)`)
+    return session
+  }
+
+  async fetchSpec(): Promise<OpenApiDoc> {
+    return demoSpec
+  }
+
+  async execute(
+    method: string,
+    path: string,
+    _queryParams: Record<string, string> = {},
+    _jsonBodyText?: string,
+  ): Promise<ExecuteResult> {
+    const body = {
+      demo: true,
+      note: 'Demo mode - no server was called. This is a canned response.',
+      method: method.toUpperCase(),
+      path,
+    }
+    return { status: 200, durationMs: 0, bodyText: JSON.stringify(body, null, 2), bodyJson: body, isDemo: true }
+  }
+
+  getPerformanceStats(): PerformanceStats {
+    return this.stats.snapshot()
+  }
+
+  async createKey(_options: CreateKeyOptions): Promise<unknown> {
+    demoKeyCounter += 1
+    return `hch-demo-FAKE-key-${demoKeyCounter}-do-not-use`
+  }
+
+  async listWebhooks(workspaceId: string): Promise<Page<WebhookEndpoint>> {
+    return paginate(webhooksByWorkspace[workspaceId] ?? [], 1, 50)
+  }
+
+  async createWebhook(workspaceId: string, url: string): Promise<WebhookEndpoint> {
+    webhookCounter += 1
+    const created: WebhookEndpoint = {
+      id: `wh_demo_${webhookCounter}`,
+      workspace_id: workspaceId,
+      url,
+      created_at: '2026-10-29T07:00:00Z',
+    }
+    webhooksByWorkspace[workspaceId] = [...(webhooksByWorkspace[workspaceId] ?? []), created]
+    return created
+  }
+
+  async deleteWebhook(workspaceId: string, endpointId: string): Promise<void> {
+    webhooksByWorkspace[workspaceId] = (webhooksByWorkspace[workspaceId] ?? []).filter(
+      (endpoint) => endpoint.id !== endpointId,
+    )
   }
 
   async listPeers(workspaceId: string, page = 1, size = 50): Promise<Page<Peer>> {

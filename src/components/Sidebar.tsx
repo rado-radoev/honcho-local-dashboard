@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react'
 import {
   BarChart3,
-  Code,
+  Building2,
+  ChevronDown,
+  Code2,
   CreditCard,
   KeyRound,
   Layers,
@@ -12,14 +14,15 @@ import {
   Users,
   Webhook,
 } from 'lucide-react'
-import { navigate, type CloudPageId, type Route } from '../lib/routing'
+import { navigate, type Route } from '../lib/routing'
 import type { HealthState } from '../state/connection'
 
-// Left navigation mirroring the cloud dashboard's sidebar, in its order:
+// Left navigation mirroring the cloud dashboard's sidebar order and icons:
 // Get Started, Explore, Instance Status, Performance, API Playground,
-// API Keys, Webhooks, Members, Billing — with Settings at the bottom.
-// Pages that manage the cloud account (billing, members, ...) have no local
-// equivalent; they open a short explainer instead of pretending to work.
+// API Keys, Webhooks, Members, Billing — Settings at the bottom.
+// Performance / Playground / API Keys / Webhooks are real local pages now;
+// only Members and Billing (cloud-account concepts with no self-hosted
+// API endpoints) keep the CLOUD badge and an explainer page.
 
 interface NavItem {
   label: string
@@ -34,10 +37,10 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'GET STARTED', icon: <Rocket className={iconClass} />, route: { name: 'get-started' }, cloudOnly: false },
   { label: 'EXPLORE', icon: <Layers className={iconClass} />, route: { name: 'explore' }, cloudOnly: false },
   { label: 'INSTANCE STATUS', icon: <Server className={iconClass} />, route: { name: 'status' }, cloudOnly: false },
-  { label: 'PERFORMANCE', icon: <BarChart3 className={iconClass} />, route: { name: 'cloud-only', page: 'performance' }, cloudOnly: true },
-  { label: 'API PLAYGROUND', icon: <Code className={iconClass} />, route: { name: 'cloud-only', page: 'playground' }, cloudOnly: true },
-  { label: 'API KEYS', icon: <KeyRound className={iconClass} />, route: { name: 'cloud-only', page: 'api-keys' }, cloudOnly: true },
-  { label: 'WEBHOOKS', icon: <Webhook className={iconClass} />, route: { name: 'cloud-only', page: 'webhooks' }, cloudOnly: true },
+  { label: 'PERFORMANCE', icon: <BarChart3 className={iconClass} />, route: { name: 'performance' }, cloudOnly: false },
+  { label: 'API PLAYGROUND', icon: <Code2 className={iconClass} />, route: { name: 'playground' }, cloudOnly: false },
+  { label: 'API KEYS', icon: <KeyRound className={iconClass} />, route: { name: 'api-keys' }, cloudOnly: false },
+  { label: 'WEBHOOKS', icon: <Webhook className={iconClass} />, route: { name: 'webhooks' }, cloudOnly: false },
   { label: 'MEMBERS', icon: <Users className={iconClass} />, route: { name: 'cloud-only', page: 'members' }, cloudOnly: true },
   { label: 'BILLING', icon: <CreditCard className={iconClass} />, route: { name: 'cloud-only', page: 'billing' }, cloudOnly: true },
 ]
@@ -45,6 +48,10 @@ const NAV_ITEMS: NavItem[] = [
 function isItemActive(item: NavItem, route: Route): boolean {
   if (item.route.name === 'get-started') return route.name === 'get-started'
   if (item.route.name === 'status') return route.name === 'status'
+  if (item.route.name === 'performance') return route.name === 'performance'
+  if (item.route.name === 'playground') return route.name === 'playground'
+  if (item.route.name === 'api-keys') return route.name === 'api-keys'
+  if (item.route.name === 'webhooks') return route.name === 'webhooks'
   if (item.route.name === 'explore') {
     return (
       route.name === 'explore' ||
@@ -56,7 +63,7 @@ function isItemActive(item: NavItem, route: Route): boolean {
     )
   }
   if (item.route.name === 'cloud-only' && route.name === 'cloud-only') {
-    return item.route.page === (route.page as CloudPageId)
+    return item.route.page === route.page
   }
   return false
 }
@@ -80,20 +87,26 @@ export function Sidebar({
   baseUrl: string
   onDisconnect: () => void
 }) {
+  const serverLabel = mode === 'demo' ? 'DEMO DATA' : baseUrl.replace(/^https?:\/\//, '')
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-line bg-ink-deep">
-      <div className="px-5 pb-2 pt-6">
-        {/* Our own text wordmark — not the cloud logo asset. */}
-        <div className="text-xl font-bold tracking-widest text-mist">HONCHO</div>
-        <div className="mt-0.5 text-[11px] tracking-widest text-fog">LOCAL DASHBOARD</div>
+      <div className="px-4 pb-2 pt-5">
+        {/* Text wordmark inside a rounded pill — our own rendering, not
+            the cloud logo graphic. */}
+        <div className="font-display inline-flex items-center rounded-full bg-panel-raise px-5 py-2.5 text-2xl font-bold tracking-widest text-mist">
+          HONCHO
+        </div>
+        <div className="mt-1.5 px-1 text-[11px] tracking-widest text-fog">LOCAL DASHBOARD</div>
       </div>
 
-      <div className="mx-5 mb-4 mt-3 flex items-center gap-2 border-b border-line pb-4 text-xs text-fog">
-        <Server className="h-4 w-4 shrink-0" />
+      {/* Server / organization switcher row, styled like the cloud's
+          PLASTIC-LABS row: building icon + label + chevron. */}
+      <div className="mx-4 mb-4 mt-3 flex items-center gap-2 border-b border-line pb-4 text-xs tracking-widest text-fog">
+        <Building2 className="h-4 w-4 shrink-0" />
         <span className="truncate" title={baseUrl}>
-          {mode === 'demo' ? 'DEMO DATA' : baseUrl.replace(/^https?:\/\//, '')}
+          {serverLabel}
         </span>
-        <span className={`ml-auto h-2 w-2 shrink-0 rounded-full ${healthDotClass(health)}`} />
+        <ChevronDown className="ml-auto h-4 w-4 shrink-0" />
       </div>
 
       <nav className="flex flex-col gap-1 px-3" aria-label="Main">
@@ -125,10 +138,18 @@ export function Sidebar({
       </nav>
 
       <div className="mt-auto px-3 pb-5">
-        <div className="mb-2 flex items-center gap-3 px-3 text-[13px] tracking-widest text-fog">
+        <button
+          type="button"
+          onClick={() => navigate({ name: 'settings' })}
+          className={
+            route.name === 'settings'
+              ? 'mb-1 flex w-full items-center gap-3 rounded-md bg-panel-raise px-3 py-2.5 text-[13px] tracking-widest text-mist'
+              : 'mb-1 flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[13px] tracking-widest text-fog hover:bg-panel hover:text-mist'
+          }
+        >
           <Settings className="h-4 w-4" />
           <span>SETTINGS</span>
-        </div>
+        </button>
         <button
           type="button"
           onClick={onDisconnect}

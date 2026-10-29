@@ -55,7 +55,7 @@ export function PageHeader({
   return (
     <div className="mb-6">
       <div className="flex items-start justify-between">
-        <h1 className="flex items-center gap-2 text-2xl font-bold tracking-wide text-mist">
+        <h1 className="font-display flex items-center gap-2 text-2xl font-bold tracking-wide text-mist">
           {icon}
           {title}
         </h1>

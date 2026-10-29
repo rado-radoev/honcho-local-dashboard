@@ -5,7 +5,9 @@ the memory server for AI agents (Hermes Agent and friends). Think of it as what
 [app.honcho.dev](https://app.honcho.dev) does for Honcho Cloud, pointed at your
 own instance: browse workspaces, peers, sessions, messages, conclusions,
 representations, and peer cards, search memory, and ask questions about a peer
-(the dialectic chat) — all read-only, all against your local server.
+(the dialectic chat), plus create workspaces/peers/sessions, edit workspace
+config, manage webhooks, mint API keys, run requests in the API Playground,
+and view locally-measured performance stats — all against your local server.
 
 The information architecture deliberately mirrors the cloud dashboard — same
 sidebar sections in the same order (Get Started, Explore, Instance Status,
@@ -13,12 +15,24 @@ Performance, API Playground, API Keys, Webhooks, Members, Billing), same
 terminology, same list → detail flows (Explore → Workspace → Peers/Sessions →
 Utilities pages with tabs) — so anyone who knows the cloud UI finds this one
 instantly familiar. The implementation, styling, and code are original; no
-cloud assets are used. Pages that only manage a cloud account (Billing,
-Members, …) appear in the sidebar with a `CLOUD` tag and explain what their
-local equivalent is instead of pretending to work.
+cloud assets are used. Only **Members** and **Billing** appear in the sidebar
+with a `CLOUD` tag and an explainer: the self-hosted v3 API has no endpoints
+for either (cloud organization / payment concepts), so there is no local data
+to show and none is faked.
 
-> **v1 is read-only.** The dashboard never creates, edits, or deletes memory
-> data. Create buttons appear (as in the cloud UI) but are disabled.
+Page notes:
+
+- **API Playground** loads the connected server's own `/openapi.json` live
+  (in demo mode, a trimmed bundled copy of the 3.4.1 spec) and executes
+  requests through the same connection/proxy/auth as the rest of the app.
+- **Performance** is measured from *this dashboard's own requests* since
+  connect — the self-hosted API exposes no server-side metrics endpoint.
+- **API Keys** is create-only: `POST /v3/keys` exists, but the API has no
+  list or revoke endpoint, so a created key is shown exactly once.
+- **Webhooks** lists/creates/deletes per-workspace endpoints via
+  `/v3/workspaces/{id}/webhooks`.
+- **Settings** shows the real connection details (server, request route,
+  server version) and Disconnect — nothing invented.
 
 ## Screenshots
 
@@ -119,6 +133,15 @@ plastic-labs/honcho (main branch):
 | POST | `/v3/workspaces/{id}/sessions/{session}/search` | Session Search tab |
 | POST | `/v3/workspaces/{id}/search` | Workspace Search |
 | GET | `/v3/workspaces/{id}/queue/status` | Deriver queue on Instance Status |
+| POST | `/v3/workspaces` | Create workspace (Explore) |
+| PUT | `/v3/workspaces/{id}` | Edit workspace metadata/configuration |
+| POST | `/v3/workspaces/{id}/peers` | Create peer |
+| POST | `/v3/workspaces/{id}/sessions` | Create session |
+| POST | `/v3/workspaces/{id}/sessions/{session}/peers` | Add checked peers to a session |
+| POST | `/v3/keys` | Create an API key (shown once; no list/revoke in the API) |
+| GET/POST | `/v3/workspaces/{id}/webhooks` | List / create webhooks |
+| DELETE | `/v3/workspaces/{id}/webhooks/{endpoint}` | Delete a webhook |
+| any | (Playground) | Generic execution of any spec endpoint |
 
 ## Development
 
@@ -151,12 +174,9 @@ the current build — re-run and diff after UI changes.
 
 ## Roadmap (v2 ideas, not built)
 
-- Writes: create workspaces/peers/sessions, add messages, edit config —
-  the full cloud utility set
+- Writes: add messages from the UI
 - Conclusion management: inspect sources, delete conclusions
   (`DELETE /v3/workspaces/{id}/conclusions/{conclusion_id}`)
-- API Keys page for real: mint scoped keys via `POST /v3/keys`
-- Webhooks list (read-only) via `GET /v3/workspaces/{id}/webhooks`
 - Representation/conclusion graphs: visualize observer → observed links
 - Streaming chat responses (`stream: true` on the chat endpoint)
 

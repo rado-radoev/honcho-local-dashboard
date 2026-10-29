@@ -93,6 +93,31 @@ export interface QueueStatus {
   pending_work_units: number
 }
 
+export interface WebhookEndpoint {
+  id: string
+  workspace_id: string | null
+  url: string
+  created_at: string
+}
+
+// Result of a generic Playground execution. HTTP error statuses are data
+// here, not exceptions — the Playground shows them in its response panel.
+export interface ExecuteResult {
+  status: number
+  durationMs: number
+  bodyText: string
+  bodyJson?: unknown
+  isDemo?: boolean
+}
+
+export interface CreateKeyOptions {
+  workspaceId?: string
+  peerId?: string
+  sessionId?: string
+  expiresAt?: string
+  scopeId?: string
+}
+
 export type ReasoningLevel = 'minimal' | 'low' | 'medium' | 'high' | 'max'
 
 export const REASONING_LEVELS: ReasoningLevel[] = ['minimal', 'low', 'medium', 'high', 'max']

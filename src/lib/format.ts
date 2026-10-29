@@ -17,10 +17,16 @@ export function formatDateTime(isoString: string): string {
   return dateTimeFormatter.format(date)
 }
 
-// Metadata / configuration cells in the cloud tables show "{}" for empty
-// objects and the raw JSON otherwise.
+// Configuration cells in the cloud tables show "{}" for empty objects
+// and the raw JSON otherwise. Metadata cells differ (per the cloud
+// Explore screenshot): empty metadata renders "None", not "{}".
 export function formatJsonCell(value: Record<string, unknown>): string {
   if (!value || Object.keys(value).length === 0) return '{}'
+  return JSON.stringify(value)
+}
+
+export function formatMetadataCell(value: Record<string, unknown>): string {
+  if (!value || Object.keys(value).length === 0) return 'None'
   return JSON.stringify(value)
 }
 

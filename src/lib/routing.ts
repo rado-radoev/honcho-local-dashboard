@@ -4,12 +4,17 @@ import { useEffect, useState } from 'react'
 // #/workspace/test-1/peers/alice?tab=chat) so views can be deep-linked,
 // bookmarked, and captured by the screenshot script without a live server.
 
-export type CloudPageId = 'performance' | 'playground' | 'api-keys' | 'webhooks' | 'members' | 'billing'
+export type CloudPageId = 'members' | 'billing'
 
 export type Route =
   | { name: 'get-started' }
   | { name: 'explore' }
   | { name: 'status' }
+  | { name: 'performance' }
+  | { name: 'playground' }
+  | { name: 'api-keys' }
+  | { name: 'webhooks' }
+  | { name: 'settings' }
   | { name: 'cloud-only', page: CloudPageId }
   | { name: 'workspace', workspaceId: string }
   | { name: 'peers', workspaceId: string }
@@ -28,6 +33,16 @@ export function routeToHash(route: Route): string {
       return '#/explore'
     case 'status':
       return '#/status'
+    case 'performance':
+      return '#/performance'
+    case 'playground':
+      return '#/playground'
+    case 'api-keys':
+      return '#/api-keys'
+    case 'webhooks':
+      return '#/webhooks'
+    case 'settings':
+      return '#/settings'
     case 'cloud-only':
       return `#/cloud/${route.page}`
     case 'workspace':
@@ -53,7 +68,16 @@ export function parseHash(hash: string): Route {
   if (segments[0] === 'get-started') return { name: 'get-started' }
   if (segments[0] === 'explore') return { name: 'explore' }
   if (segments[0] === 'status') return { name: 'status' }
+  if (segments[0] === 'performance') return { name: 'performance' }
+  if (segments[0] === 'playground') return { name: 'playground' }
+  if (segments[0] === 'api-keys') return { name: 'api-keys' }
+  if (segments[0] === 'webhooks') return { name: 'webhooks' }
+  if (segments[0] === 'settings') return { name: 'settings' }
   if (segments[0] === 'cloud' && segments.length === 2) {
+    if (segments[1] === 'performance') return { name: 'performance' }
+    if (segments[1] === 'playground') return { name: 'playground' }
+    if (segments[1] === 'api-keys') return { name: 'api-keys' }
+    if (segments[1] === 'webhooks') return { name: 'webhooks' }
     return { name: 'cloud-only', page: segments[1] as CloudPageId }
   }
   if (segments[0] === 'workspace' && segments.length >= 2) {

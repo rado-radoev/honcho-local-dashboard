@@ -1,5 +1,7 @@
 import type {
   Conclusion,
+  CreateKeyOptions,
+  ExecuteResult,
   Message,
   Page,
   Peer,
@@ -8,9 +10,25 @@ import type {
   Session,
   SessionContext,
   SessionSummaries,
+  WebhookEndpoint,
   Workspace,
 } from '../types'
 import type { HonchoApi } from './honchoApi'
+import type { OpenApiDoc } from './openapi'
+import { StatsCollector, type PerformanceStats } from '../lib/stats'
+import { ensureRecord, normalizePage } from '../lib/page'
+
+type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
+
+function normalizeWorkspace(raw: Workspace): Workspace {
+  return { ...raw, metadata: ensureRecord(raw.metadata), configuration: ensureRecord(raw.configuration) }
+}
+function normalizePeer(raw: Peer): Peer {
+  return { ...raw, metadata: ensureRecord(raw.metadata), configuration: ensureRecord(raw.configuration) }
+}
+function normalizeSession(raw: Session): Session {
+  return { ...raw, metadata: ensureRecord(raw.metadata), configuration: ensureRecord(raw.configuration) }
+}
 
 // Error type for failed Honcho requests. `status` is the HTTP status code,
 // or 0 when the request never reached the server (network error / CORS).
@@ -148,6 +166,7 @@ export class HonchoClient implements HonchoApi {
   private readonly useProxy: boolean
   private readonly token?: string
   private readonly fetchFn: typeof fetch
+  private readonly stats = new StatsCollector()
 
   constructor(options: HonchoClientOptions) {
     this.requestBase = resolveRequestBase(options)
@@ -171,22 +190,46 @@ export class HonchoClient implements HonchoApi {
     return `${method} ${url} (direct, no proxy — useProxy ${proxyState})`
   }
 
-  private async request<T>(
-    method: 'GET' | 'POST',
-    path: string,
-    body?: unknown,
-  ): Promise<T> {
+  private buildHeaders(hasBody: boolean): Record<string, string> {
     const headers: Record<string, string> = {}
-    if (body !== undefined) headers['Content-Type'] = 'application/json'
+    if (hasBody) headers['Content-Type'] = 'application/json'
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`
+    return headers
+  }
 
+  // One raw fetch through the bound fetchFn, recording the call in the
+  // performance stats collector (status 0 when the request never landed).
+  private async rawFetch(
+    method: HttpMethod,
+    path: string,
+    bodyText?: string,
+  ): Promise<{ response: Response; durationMs: number }> {
+    const started = performance.now()
+    try {
+      const response = await this.fetchFn(`${this.requestBase}${path}`, {
+        method,
+        headers: this.buildHeaders(bodyText !== undefined),
+        body: bodyText,
+      })
+      const durationMs = performance.now() - started
+      this.stats.record(method, path, response.status, durationMs)
+      return { response, durationMs }
+    } catch (error) {
+      const durationMs = performance.now() - started
+      this.stats.record(method, path, 0, durationMs)
+      throw error
+    }
+  }
+
+  private async request<T>(method: HttpMethod, path: string, body?: unknown): Promise<T> {
     let response: Response
     try {
-      response = await this.fetchFn(`${this.requestBase}${path}`, {
+      const result = await this.rawFetch(
         method,
-        headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
-      })
+        path,
+        body === undefined ? undefined : JSON.stringify(body),
+      )
+      response = result.response
     } catch {
       // fetch itself rejected: server unreachable, DNS, or a CORS block.
       throw new HonchoError(
@@ -208,7 +251,66 @@ export class HonchoClient implements HonchoApi {
       )
     }
 
+    if (response.status === 204) return undefined as T
+    if (typeof response.text === 'function') {
+      const text = await response.text()
+      if (text.trim().length === 0) return undefined as T
+      try {
+        return JSON.parse(text) as T
+      } catch {
+        // Plain-text response (e.g. a raw key string) — return as-is.
+        return text as T
+      }
+    }
     return (await response.json()) as T
+  }
+
+  // Generic Playground execution: HTTP error statuses are returned as
+  // data, never thrown. Network failures also return (status 0).
+  async execute(
+    method: string,
+    path: string,
+    queryParams: Record<string, string> = {},
+    jsonBodyText?: string,
+  ): Promise<ExecuteResult> {
+    const query = new URLSearchParams()
+    for (const [key, value] of Object.entries(queryParams)) {
+      if (value.trim().length > 0) query.set(key, value)
+    }
+    const queryText = query.toString()
+    const fullPath = queryText.length > 0 ? `${path}?${queryText}` : path
+    const upper = method.toUpperCase() as HttpMethod
+    try {
+      const { response, durationMs } = await this.rawFetch(
+        upper,
+        fullPath,
+        jsonBodyText && jsonBodyText.trim().length > 0 ? jsonBodyText : undefined,
+      )
+      let bodyText = ''
+      if (typeof response.text === 'function') {
+        bodyText = await response.text()
+      } else if (typeof response.json === 'function') {
+        const parsed = await response.json().catch(() => null)
+        bodyText = parsed === null ? '' : JSON.stringify(parsed)
+      }
+      let bodyJson: unknown
+      try {
+        bodyJson = JSON.parse(bodyText)
+      } catch {
+        bodyJson = undefined
+      }
+      return { status: response.status, durationMs, bodyText, bodyJson }
+    } catch {
+      return { status: 0, durationMs: 0, bodyText: 'Network error: could not reach the server.' }
+    }
+  }
+
+  async fetchSpec(): Promise<OpenApiDoc> {
+    return this.request<OpenApiDoc>('GET', '/openapi.json')
+  }
+
+  getPerformanceStats(): PerformanceStats {
+    return this.stats.snapshot()
   }
 
   private pageQuery(page: number, size: number): string {
@@ -229,15 +331,42 @@ export class HonchoClient implements HonchoApi {
   }
 
   async listWorkspaces(page = 1, size = 50): Promise<Page<Workspace>> {
-    return this.request<Page<Workspace>>('POST', `/v3/workspaces/list${this.pageQuery(page, size)}`, {})
+    const raw = await this.request<unknown>('POST', `/v3/workspaces/list${this.pageQuery(page, size)}`, {})
+    const normalized = normalizePage<Workspace>(raw, page, size)
+    return { ...normalized, items: normalized.items.map(normalizeWorkspace) }
+  }
+
+  async createWorkspace(id: string): Promise<Workspace> {
+    const raw = await this.request<Workspace>('POST', '/v3/workspaces', { id })
+    return normalizeWorkspace(raw)
+  }
+
+  async updateWorkspace(
+    workspaceId: string,
+    update: { metadata?: Record<string, unknown>; configuration?: Record<string, unknown> },
+  ): Promise<Workspace> {
+    const raw = await this.request<Workspace>('PUT', `/v3/workspaces/${workspaceId}`, update)
+    return normalizeWorkspace(raw)
+  }
+
+  async getWorkspace(workspaceId: string): Promise<Workspace | null> {
+    const page = await this.listWorkspaces(1, 50)
+    return page.items.find((workspace) => workspace.id === workspaceId) ?? null
   }
 
   async listPeers(workspaceId: string, page = 1, size = 50): Promise<Page<Peer>> {
-    return this.request<Page<Peer>>(
+    const raw = await this.request<unknown>(
       'POST',
       `/v3/workspaces/${workspaceId}/peers/list${this.pageQuery(page, size)}`,
       {},
     )
+    const normalized = normalizePage<Peer>(raw, page, size)
+    return { ...normalized, items: normalized.items.map(normalizePeer) }
+  }
+
+  async createPeer(workspaceId: string, id: string): Promise<Peer> {
+    const raw = await this.request<Peer>('POST', `/v3/workspaces/${workspaceId}/peers`, { id })
+    return normalizePeer(raw)
   }
 
   async getPeerCard(workspaceId: string, peerId: string): Promise<string[] | null> {
@@ -263,27 +392,52 @@ export class HonchoClient implements HonchoApi {
     page = 1,
     size = 50,
   ): Promise<Page<Conclusion>> {
-    return this.request<Page<Conclusion>>(
+    const raw = await this.request<unknown>(
       'POST',
       `/v3/workspaces/${workspaceId}/conclusions/list${this.pageQuery(page, size)}`,
       { filters: { observed_id: peerId } },
     )
+    return normalizePage<Conclusion>(raw, page, size)
   }
 
   async listSessions(workspaceId: string, page = 1, size = 50): Promise<Page<Session>> {
-    return this.request<Page<Session>>(
+    const raw = await this.request<unknown>(
       'POST',
       `/v3/workspaces/${workspaceId}/sessions/list${this.pageQuery(page, size)}`,
       {},
     )
+    const normalized = normalizePage<Session>(raw, page, size)
+    return { ...normalized, items: normalized.items.map(normalizeSession) }
+  }
+
+  async createSession(workspaceId: string, id: string): Promise<Session> {
+    const raw = await this.request<Session>('POST', `/v3/workspaces/${workspaceId}/sessions`, { id })
+    return normalizeSession(raw)
+  }
+
+  async addPeersToSession(
+    workspaceId: string,
+    sessionId: string,
+    peerIds: string[],
+  ): Promise<Session> {
+    const body: Record<string, Record<string, unknown>> = {}
+    for (const peerId of peerIds) body[peerId] = {}
+    const raw = await this.request<Session>(
+      'POST',
+      `/v3/workspaces/${workspaceId}/sessions/${sessionId}/peers`,
+      body,
+    )
+    return normalizeSession(raw)
   }
 
   async listSessionsForPeer(workspaceId: string, peerId: string): Promise<Page<Session>> {
-    return this.request<Page<Session>>(
+    const raw = await this.request<unknown>(
       'POST',
-      `/v3/workspaces/${workspaceId}/peers/${peerId}/sessions`,
+      `/v3/workspaces/${workspaceId}/peers/${peerId}/sessions${this.pageQuery(1, 50)}`,
       {},
     )
+    const normalized = normalizePage<Session>(raw, 1, 50)
+    return { ...normalized, items: normalized.items.map(normalizeSession) }
   }
 
   async listMessages(
@@ -292,19 +446,20 @@ export class HonchoClient implements HonchoApi {
     page = 1,
     size = 50,
   ): Promise<Page<Message>> {
-    return this.request<Page<Message>>(
+    const raw = await this.request<unknown>(
       'POST',
       `/v3/workspaces/${workspaceId}/sessions/${sessionId}/messages/list${this.pageQuery(page, size)}`,
       {},
     )
+    return normalizePage<Message>(raw, page, size)
   }
 
   async getSessionPeers(workspaceId: string, sessionId: string): Promise<Peer[]> {
-    const page = await this.request<Page<Peer>>(
+    const raw = await this.request<unknown>(
       'GET',
       `/v3/workspaces/${workspaceId}/sessions/${sessionId}/peers`,
     )
-    return page.items
+    return normalizePage<Peer>(raw, 1, 50).items.map(normalizePeer)
   }
 
   async getSessionSummaries(workspaceId: string, sessionId: string): Promise<SessionSummaries> {
@@ -378,5 +533,35 @@ export class HonchoClient implements HonchoApi {
 
   async getQueueStatus(workspaceId: string): Promise<QueueStatus> {
     return this.request<QueueStatus>('GET', `/v3/workspaces/${workspaceId}/queue/status`)
+  }
+
+  async createKey(options: CreateKeyOptions): Promise<unknown> {
+    const query = new URLSearchParams()
+    if (options.workspaceId) query.set('workspace_id', options.workspaceId)
+    if (options.peerId) query.set('peer_id', options.peerId)
+    if (options.sessionId) query.set('session_id', options.sessionId)
+    if (options.expiresAt) query.set('expires_at', options.expiresAt)
+    if (options.scopeId) query.set('scope_id', options.scopeId)
+    const suffix = query.toString().length > 0 ? `?${query.toString()}` : ''
+    return this.request<unknown>('POST', `/v3/keys${suffix}`)
+  }
+
+  async listWebhooks(workspaceId: string): Promise<Page<WebhookEndpoint>> {
+    const raw = await this.request<unknown>(
+      'GET',
+      `/v3/workspaces/${workspaceId}/webhooks${this.pageQuery(1, 50)}`,
+    )
+    return normalizePage<WebhookEndpoint>(raw, 1, 50)
+  }
+
+  async createWebhook(workspaceId: string, url: string): Promise<WebhookEndpoint> {
+    return this.request<WebhookEndpoint>('POST', `/v3/workspaces/${workspaceId}/webhooks`, { url })
+  }
+
+  async deleteWebhook(workspaceId: string, endpointId: string): Promise<void> {
+    await this.request<unknown>(
+      'DELETE',
+      `/v3/workspaces/${workspaceId}/webhooks/${endpointId}`,
+    )
   }
 }

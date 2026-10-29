@@ -74,6 +74,13 @@ const DEMO_VIEWS = [
   },
   { file: 'session-peers.png', hash: '#/workspace/test-1/sessions/groupchat_1?tab=peers' },
   { file: 'status.png', hash: '#/status' },
+  { file: 'performance.png', hash: '#/performance' },
+  { file: 'playground.png', hash: '#/playground' },
+  { file: 'api-keys.png', hash: '#/api-keys' },
+  { file: 'webhooks.png', hash: '#/webhooks' },
+  { file: 'settings.png', hash: '#/settings' },
+  { file: 'members.png', hash: '#/cloud/members' },
+  { file: 'billing.png', hash: '#/cloud/billing' },
 ]
 
 // Before each capture, freeze everything that can render differently

@@ -11,6 +11,11 @@ import { SessionsPage } from './pages/SessionsPage'
 import { SessionPage } from './pages/SessionPage'
 import { StatusPage } from './pages/StatusPage'
 import { CloudOnlyPage } from './pages/CloudOnlyPage'
+import { PerformancePage } from './pages/PerformancePage'
+import { PlaygroundPage } from './pages/PlaygroundPage'
+import { ApiKeysPage } from './pages/ApiKeysPage'
+import { WebhooksPage } from './pages/WebhooksPage'
+import { SettingsPage } from './pages/SettingsPage'
 import { ErrorBox } from './components/ui'
 import type { Route } from './lib/routing'
 
@@ -24,6 +29,16 @@ function RoutedPage({ route }: { route: Route }) {
       return <StatusPage />
     case 'cloud-only':
       return <CloudOnlyPage page={route.page} />
+    case 'performance':
+      return <PerformancePage />
+    case 'playground':
+      return <PlaygroundPage />
+    case 'api-keys':
+      return <ApiKeysPage />
+    case 'webhooks':
+      return <WebhooksPage />
+    case 'settings':
+      return <SettingsPage />
     case 'workspace':
       return <WorkspacePage workspaceId={route.workspaceId} />
     case 'peers':

@@ -1,3 +1,5 @@
+@import "@fontsource/silkscreen/400.css";
+@import "@fontsource/silkscreen/700.css";
 @import "tailwindcss";
 
 /*
@@ -16,6 +18,11 @@
   --color-badge: #bcd6ff;
   --color-badge-ink: #0a0e1a;
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --font-display: "Silkscreen", ui-monospace, Menlo, Consolas, monospace;
+}
+
+.font-display {
+  font-family: var(--font-display);
 }
 
 html,
