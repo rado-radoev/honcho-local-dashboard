@@ -5,12 +5,16 @@ import {
   MAP_HEIGHT,
   MAP_WIDTH,
   layoutConstellation,
+  layoutConstellationRadius,
   layoutNetwork,
+  radiusBandCenter,
   type DotLayout,
   type HubLayout,
+  type RadiusDotLayout,
 } from '../lib/memoryGraph'
 import { orbitBandForDistance, orbitRotationDeg } from '../lib/orbit'
-import type { StableSlot } from '../lib/stableLayout'
+import type { RadiusSlot, StableSlot } from '../lib/stableLayout'
+import { RADIUS_BAND_LABELS, monthTicksForPeer } from '../lib/derivationDepth'
 import { focusOpacity, focusScale, focusTransform } from '../lib/hubFocus'
 import type { TraceChainResult } from '../lib/traceChain'
 import {
@@ -49,13 +53,15 @@ interface OrbitGroup {
 function buildOrbitGroups(
   dots: DotLayout[],
   hubs: HubLayout[],
+  bandOf?: (dot: DotLayout) => number,
 ): OrbitGroup[] {
   const hubByPeer = new Map(hubs.map((hub) => [hub.peerId, hub]))
   const groups = new Map<string, OrbitGroup>()
   for (const dot of dots) {
     const hub = hubByPeer.get(dot.peerId)
     if (!hub) continue
-    const band = orbitBandForDistance(Math.hypot(dot.x - hub.x, dot.y - hub.y))
+    let band = orbitBandForDistance(Math.hypot(dot.x - hub.x, dot.y - hub.y))
+    if (bandOf) band = bandOf(dot)
     const key = `${dot.peerId}:${band}`
     let group = groups.get(key)
     if (!group) {
@@ -98,6 +104,31 @@ function applyStableSlots(
       ...dot,
       x: clampToMap(hub.x + slot.radius * Math.cos(slot.angle), MAP_WIDTH),
       y: clampToMap(hub.y + slot.radius * Math.sin(slot.angle), MAP_HEIGHT),
+    }
+  })
+}
+
+// Apply append-stable radius slots (lib/stableLayout.ts) over the
+// rank-based radius layout: a dot with a slot renders at the slot's
+// angle + sub-ring offset inside its band, so dataset refreshes never
+// move existing dots within their (peer, band) group.
+function applyRadiusStableSlots(
+  dots: RadiusDotLayout[],
+  hubs: HubLayout[],
+  slots: ReadonlyMap<string, RadiusSlot> | undefined,
+): RadiusDotLayout[] {
+  if (!slots) return dots
+  const hubByPeer = new Map(hubs.map((hub) => [hub.peerId, hub]))
+  return dots.map((dot) => {
+    const slot = slots.get(dot.conclusion.id)
+    if (!slot || slot.peerId !== dot.peerId || slot.band !== dot.band) return dot
+    const hub = hubByPeer.get(dot.peerId)
+    if (!hub) return dot
+    const distance = radiusBandCenter(dot.band) + slot.subRadius
+    return {
+      ...dot,
+      x: clampToMap(hub.x + distance * Math.cos(slot.angle), MAP_WIDTH),
+      y: clampToMap(hub.y + distance * Math.sin(slot.angle), MAP_HEIGHT),
     }
   })
 }
@@ -163,6 +194,8 @@ function traceDotState(
   return 'pending'
 }
 
+export type ConstellationLayoutVariant = 'spiral' | 'radius'
+
 export function ConstellationSvg({
   conclusions,
   peerIds,
@@ -170,6 +203,9 @@ export function ConstellationSvg({
   search,
   motion,
   slots,
+  layoutVariant = 'spiral',
+  radiusSlots,
+  depthById,
   focusedPeer,
   trace,
   activeTraceStep,
@@ -188,6 +224,13 @@ export function ConstellationSvg({
   search: string
   motion: boolean
   slots?: ReadonlyMap<string, StableSlot>
+  // Reasoning Radius (Phase E): 'radius' swaps the spiral placement
+  // for derivation-depth rings. Depth is computed by the PAGE over
+  // the full fetched set (not this filtered `conclusions` list) and
+  // passed in, so filtering/scrubbing can never change a dot's ring.
+  layoutVariant?: ConstellationLayoutVariant
+  radiusSlots?: ReadonlyMap<string, RadiusSlot>
+  depthById?: ReadonlyMap<string, number>
   // Hub focus mode (lib/hubFocus.ts): the peer whose cluster stays
   // opaque + scales up, or null when focus is off.
   focusedPeer: string | null
@@ -214,13 +257,30 @@ export function ConstellationSvg({
   onHubClick: (peerId: string) => void
   onBackgroundClick: () => void
 }) {
+  const isRadius = layoutVariant === 'radius'
   const layout = layoutConstellation(conclusions, peerIds, MAP_WIDTH, MAP_HEIGHT)
-  const dots = applyStableSlots(layout.dots, layout.hubs, slots)
+  let dots: DotLayout[] = applyStableSlots(layout.dots, layout.hubs, slots)
+  if (isRadius) {
+    const radiusLayout = layoutConstellationRadius(
+      conclusions,
+      peerIds,
+      depthById ?? new Map(),
+      MAP_WIDTH,
+      MAP_HEIGHT,
+    )
+    dots = applyRadiusStableSlots(radiusLayout.dots, radiusLayout.hubs, radiusSlots)
+  }
   const dotById = new Map(dots.map((dot) => [dot.conclusion.id, dot]))
   const hubByPeer = new Map(layout.hubs.map((hub) => [hub.peerId, hub]))
   const needle = search.trim().toLowerCase()
   const selectedDot = selected ? dotById.get(selected.id) : undefined
-  const groups = buildOrbitGroups(dots, layout.hubs)
+  // In Radius mode the orbit bands ARE the depth rings: a band group
+  // rotates by its ring index, not by a distance-derived shell.
+  let radiusBandOf: ((dot: DotLayout) => number) | undefined
+  if (isRadius) {
+    radiusBandOf = (dot) => (dot as RadiusDotLayout).band ?? 0
+  }
+  const groups = buildOrbitGroups(dots, layout.hubs, radiusBandOf)
   const groupsByPeer = new Map<string, OrbitGroup[]>()
   for (const group of groups) {
     const list = groupsByPeer.get(group.hub.peerId) ?? []
@@ -272,6 +332,52 @@ export function ConstellationSvg({
         data-testid="map-background"
         onClick={onBackgroundClick}
       />
+
+      {/* Reasoning Radius guides (Radius mode only): one faint ring
+          per depth band around each hub, labelled on the upper-right
+          diagonal. Purely presentational — dots, tethers and orbit
+          groups are computed from the same band centres. */}
+      {isRadius && !layout.aggregated
+        ? layout.hubs.map((hub) => (
+            <g key={`rings-${hub.peerId}`} pointerEvents="none">
+              {RADIUS_BAND_LABELS.map((label, band) => {
+                const centre = radiusBandCenter(band)
+                const labelX = hub.x + centre * Math.SQRT1_2
+                const labelY = hub.y - centre * Math.SQRT1_2
+                return (
+                  <g key={label}>
+                    <circle
+                      data-testid="radius-ring"
+                      data-peer={hub.peerId}
+                      data-band={band}
+                      cx={hub.x}
+                      cy={hub.y}
+                      r={centre}
+                      fill="none"
+                      stroke="#8EA3C7"
+                      strokeWidth={0.7}
+                      strokeDasharray="3 4"
+                      opacity={0.35}
+                    />
+                    <text
+                      data-testid="radius-ring-label"
+                      data-peer={hub.peerId}
+                      data-band={band}
+                      x={labelX}
+                      y={labelY}
+                      textAnchor="middle"
+                      fill="#9FB0CC"
+                      fontSize={8.5}
+                      opacity={0.85}
+                    >
+                      {label}
+                    </text>
+                  </g>
+                )
+              })}
+            </g>
+          ))
+        : null}
 
       {/* Derivation edges stay at base angles (the simpler correct
           option): they are drawn from the deterministic layout, not
@@ -426,6 +532,8 @@ export function ConstellationSvg({
                       <circle
                         data-testid="map-dot"
                         data-conclusion-id={dot.conclusion.id}
+                        data-depth={(dot as RadiusDotLayout).depth}
+                        data-band={(dot as RadiusDotLayout).band}
                         cx={dot.x}
                         cy={dot.y}
                         r={isSelected ? dot.r + 2 : dot.r}
@@ -544,6 +652,7 @@ export function ConstellationSvg({
           </title>
           <circle cx={hub.x} cy={hub.y} r={20} fill="transparent" />
           <circle cx={hub.x} cy={hub.y} r={13} fill="#10141F" stroke="url(#hub-ring)" strokeWidth={2} />
+          {isRadius ? renderMonthTicks(hub, conclusions) : null}
           <text x={hub.x} y={hub.y + 28} textAnchor="middle" fill="#DBE4F5" fontSize={12}>
             {hub.peerId}
           </text>
@@ -552,6 +661,46 @@ export function ConstellationSvg({
       ))}
     </svg>
   )
+}
+
+// Strata borrow (Radius mode only): faint month rim ticks around a
+// hub — one tick per month present in that peer's data, spread evenly
+// from the top of the hub ring in chronological order, each labelled
+// with its short month name just outside the tick. Subtle by design
+// (fog colour, low opacity); the page legend explains them.
+function renderMonthTicks(hub: HubLayout, conclusions: Conclusion[]) {
+  const ticks = monthTicksForPeer(conclusions, hub.peerId)
+  return ticks.map((tick) => {
+    const cos = Math.cos(tick.angle)
+    const sin = Math.sin(tick.angle)
+    return (
+      <g key={tick.key} pointerEvents="none" opacity={0.55}>
+        <line
+          data-testid="month-rim-tick"
+          data-peer={hub.peerId}
+          data-month={tick.key}
+          x1={hub.x + 15.5 * cos}
+          y1={hub.y + 15.5 * sin}
+          x2={hub.x + 19.5 * cos}
+          y2={hub.y + 19.5 * sin}
+          stroke="#9FB0CC"
+          strokeWidth={1.2}
+        />
+        <text
+          data-testid="month-rim-tick-label"
+          data-peer={hub.peerId}
+          data-month={tick.key}
+          x={hub.x + 26 * cos}
+          y={hub.y + 26 * sin + 2.5}
+          textAnchor="middle"
+          fill="#9FB0CC"
+          fontSize={7.5}
+        >
+          {tick.label}
+        </text>
+      </g>
+    )
+  })
 }
 
 // Dusk hub extras (Age mode only): a "last learned Xd ago" line under

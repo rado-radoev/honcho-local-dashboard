@@ -9,18 +9,32 @@ import {
   ConstellationSvg,
   NetworkSvg,
   type ConstellationColorMode,
+  type ConstellationLayoutVariant,
 } from '../components/MemoryMapCanvas'
+import {
+  RADIUS_BAND_LABELS,
+  computeDerivationDepths,
+  radiusBandForDepth,
+} from '../lib/derivationDepth'
 import { TimelineSvg } from '../components/TimelineCanvas'
 import { FaultLinesPanel } from '../components/FaultLines'
 import { maxCreatedAtMs } from '../lib/ageStyle'
 import { GrowthChart } from '../components/charts'
 import { buildGrowthSeries } from '../lib/charts'
 import { CONCLUSION_LEVELS, LEVEL_COLORS, cappedLabel } from '../lib/conclusions'
-import { MAP_HEIGHT, MAP_WIDTH, type DotLayout } from '../lib/memoryGraph'
+import {
+  MAP_HEIGHT,
+  MAP_WIDTH,
+  type DotLayout,
+  type RadiusDotLayout,
+} from '../lib/memoryGraph'
 import { isStillSearch } from '../lib/orbit'
 import {
+  EMPTY_RADIUS_STABLE_LAYOUT,
   EMPTY_STABLE_LAYOUT,
+  advanceRadiusStableLayout,
   advanceStableLayout,
+  type RadiusStableLayoutState,
   type StableLayoutState,
 } from '../lib/stableLayout'
 import { traceChain, type TraceChainResult } from '../lib/traceChain'
@@ -77,6 +91,11 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
   // Dusk overlay (Phase C2): constellation colour mode — level
   // colours, or age fading relative to the reference "now" below.
   const [colorMode, setColorMode] = useState<ConstellationColorMode>('level')
+  // Reasoning Radius (Phase E): a layout toggle ON the Constellation,
+  // not a replacement — Spiral stays the default and one click swaps
+  // the dot placement (never the data: no refetch, selection/focus/
+  // trace state all live above this toggle and are untouched by it).
+  const [layoutVariant, setLayoutVariant] = useState<ConstellationLayoutVariant>('spiral')
   const [view, setView] = useState<'map' | 'list'>('map')
   const [levels, setLevels] = useState<Set<ConclusionLevel>>(new Set(CONCLUSION_LEVELS))
   const [hiddenPeers, setHiddenPeers] = useState<Set<string>>(new Set())
@@ -137,6 +156,43 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
   }
   const stableSlots =
     stable.workspace === activeWorkspace ? stable.layout.slots : EMPTY_STABLE_LAYOUT.slots
+
+  // Reasoning Radius depths: computed over the FULL fetched set
+  // (`all`), never over the filtered/scrubbed `visible` list — a
+  // dot's ring is its derivation depth within the loaded memories,
+  // so hiding a level or scrubbing time must not move it to another
+  // ring. Sources outside the capped fetch contribute no hop (the
+  // legend says so).
+  const depthById = useMemo(() => computeDerivationDepths(all), [all])
+  const bandById = useMemo(() => {
+    const bands = new Map<string, number>()
+    for (const [id, depth] of depthById) bands.set(id, radiusBandForDepth(depth))
+    return bands
+  }, [depthById])
+
+  // Append-stable radius slots, same adjust-during-render pattern as
+  // the spiral slots above: within a (peer, depth-band) group a dot
+  // keeps its first-assigned angle/sub-ring across refreshes.
+  const [radiusStable, setRadiusStable] = useState<{
+    workspace: string | null
+    dataset: Conclusion[] | null
+    layout: RadiusStableLayoutState
+  }>({ workspace: null, dataset: null, layout: EMPTY_RADIUS_STABLE_LAYOUT })
+  if (radiusStable.workspace !== activeWorkspace || radiusStable.dataset !== all) {
+    const base =
+      radiusStable.workspace === activeWorkspace
+        ? radiusStable.layout
+        : EMPTY_RADIUS_STABLE_LAYOUT
+    setRadiusStable({
+      workspace: activeWorkspace,
+      dataset: all,
+      layout: advanceRadiusStableLayout(base, all, bandById),
+    })
+  }
+  const radiusSlots =
+    radiusStable.workspace === activeWorkspace
+      ? radiusStable.layout.slots
+      : EMPTY_RADIUS_STABLE_LAYOUT.slots
 
   // New-memory tracking (A2), same adjust-during-render pattern as the
   // stable layout above: whenever a fresh capped dataset lands, diff
@@ -398,6 +454,9 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
         search={search}
         motion={motion}
         slots={stableSlots}
+        layoutVariant={layoutVariant}
+        radiusSlots={radiusSlots}
+        depthById={depthById}
         focusedPeer={focusedPeer}
         trace={trace ? trace.result : null}
         activeTraceStep={activeTraceStep}
@@ -426,6 +485,10 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
   if (mode === 'fault') {
     detailHint =
       'Fault Lines groups every contradiction in the fetched set by source linkage — cross-references, shared source conclusions, shared source messages. Anything with no discoverable link is listed as Unlinked, never force-matched.'
+  }
+  if (mode === 'constellation' && layoutVariant === 'radius') {
+    detailHint =
+      'Click a dot to inspect a conclusion. Distance from the hub = derivation depth within the loaded memories: the core ring is what was actually said, each ring outward is one more source hop. Color = level, size = times derived.'
   }
 
   return (
@@ -571,6 +634,27 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
             </button>
           </div>
         ) : null}
+        {mode === 'constellation' ? (
+          <div className="flex overflow-hidden rounded-md border border-line" role="group" aria-label="Constellation layout">
+            <span className="px-2 py-1.5 text-sm text-fog">Layout:</span>
+            <button
+              type="button"
+              onClick={() => setLayoutVariant('spiral')}
+              aria-pressed={layoutVariant === 'spiral'}
+              className={layoutVariant === 'spiral' ? 'bg-panel-raise px-3 py-1.5 text-sm text-mist' : 'px-3 py-1.5 text-sm text-fog'}
+            >
+              Spiral
+            </button>
+            <button
+              type="button"
+              onClick={() => setLayoutVariant('radius')}
+              aria-pressed={layoutVariant === 'radius'}
+              className={layoutVariant === 'radius' ? 'bg-panel-raise px-3 py-1.5 text-sm text-mist' : 'px-3 py-1.5 text-sm text-fog'}
+            >
+              Radius
+            </button>
+          </div>
+        ) : null}
         <div className="flex overflow-hidden rounded-md border border-line" role="group" aria-label="View">
           <button
             type="button"
@@ -686,6 +770,13 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
               <span className="mt-1 block text-fog">
                 {hover.conclusion.level} · derived ×{hover.conclusion.times_derived}
               </span>
+              {layoutVariant === 'radius' ? (
+                <span className="mt-1 block text-fog">
+                  ring: {RADIUS_BAND_LABELS[(hover as RadiusDotLayout).band ?? 0]} · depth{' '}
+                  {(hover as RadiusDotLayout).depth ?? 0} within loaded memories · dot size =
+                  √(times derived)
+                </span>
+              ) : null}
             </div>
           ) : null}
           {capped.data && capped.data.items.length > 5000 ? (
@@ -719,6 +810,15 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
                   <dt className="text-fog">Times derived</dt>
                   <dd className="tabular-nums text-mist">{selected.times_derived}</dd>
                 </div>
+                {layoutVariant === 'radius' ? (
+                  <div className="flex justify-between">
+                    <dt className="text-fog">Derivation depth</dt>
+                    <dd className="tabular-nums text-mist">
+                      {depthById.get(selected.id) ?? 0} ·{' '}
+                      {RADIUS_BAND_LABELS[radiusBandForDepth(depthById.get(selected.id) ?? 0)]}
+                    </dd>
+                  </div>
+                ) : null}
                 <div className="flex justify-between">
                   <dt className="text-fog">Created</dt>
                   <dd className="text-mist">{formatDateTime(selected.created_at)}</dd>
@@ -847,6 +947,16 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
               contradiction #FF7A7A. Dot radius = √(times derived).
             </p>
           )}
+          {mode === 'constellation' && layoutVariant === 'radius' ? (
+            <p className="mt-3 text-[11px] leading-relaxed text-fog">
+              Legend (Radius): ring distance from a hub = derivation depth — Said (core, no
+              in-set sources) · Derived ×1 · Derived ×2 · Derived ×3+. Depth is computed
+              within the loaded memories only; sources may lie outside the capped fetch and
+              contribute no ring. Faint rim ticks around a hub mark the months present in
+              that peer&apos;s data, in chronological order from the top. Dot size stays
+              √(times derived), exactly as in Spiral.
+            </p>
+          ) : null}
         </aside>
       </div>
     </div>

@@ -1,5 +1,6 @@
 import type { Conclusion, ConclusionLevel } from '../types'
 import { LEVEL_COLORS } from './conclusions'
+import { radiusBandForDepth } from './derivationDepth'
 
 // Pure deterministic layout for the Memory Map. No force simulation, no
 // randomness, no Date.now: peers are sorted by id onto a circle, and
@@ -150,6 +151,85 @@ export function layoutConstellation(
     })
   }
   return { hubs, dots, cells: [], aggregated: false, total: unique.length }
+}
+
+// ---------------------------------------------------------------------------
+// Reasoning Radius layout (Phase E): the Constellation's alternate
+// layout. Hubs sit exactly where the spiral puts them; a dot's
+// DISTANCE from its hub is its derivation depth band (see
+// lib/derivationDepth.ts) instead of its age rank. Within a
+// (peer, band) group dots are spread by the golden angle in
+// (created_at, id) order, cycling three sub-rings (-6/0/+6px) inside
+// the band — the same spread arithmetic the append-stable radius
+// slots in lib/stableLayout.ts reproduce, so a first load under
+// stable slots lands exactly on these coordinates.
+
+export interface RadiusDotLayout extends DotLayout {
+  // Longest in-set ancestor chain below this conclusion.
+  depth: number
+  // Display band: min(depth, 3) — the ring the dot sits on.
+  band: number
+}
+
+export interface RadiusLayout {
+  hubs: HubLayout[]
+  dots: RadiusDotLayout[]
+  cells: DensityCell[]
+  aggregated: boolean
+  total: number
+}
+
+// Centre radius of each display band. Band spacing matches the
+// orbit band width closely enough that orbitBandForDistance agrees
+// with the band for a dot at a band centre.
+export function radiusBandCenter(band: number): number {
+  return 26 + 22 * band
+}
+
+export function layoutConstellationRadius(
+  conclusions: Conclusion[],
+  peerIds: string[],
+  depthById: ReadonlyMap<string, number>,
+  width = MAP_WIDTH,
+  height = MAP_HEIGHT,
+): RadiusLayout {
+  const base = layoutConstellation(conclusions, peerIds, width, height)
+  if (base.aggregated) {
+    return { hubs: base.hubs, dots: [], cells: base.cells, aggregated: true, total: base.total }
+  }
+  const small = base.total > DOT_SMALL_THRESHOLD
+  const groups = new Map<string, Conclusion[]>()
+  for (const dot of base.dots) {
+    const key = `${dot.peerId}:${radiusBandForDepth(depthById.get(dot.conclusion.id) ?? 0)}`
+    const list = groups.get(key) ?? []
+    list.push(dot.conclusion)
+    groups.set(key, list)
+  }
+  const dots: RadiusDotLayout[] = []
+  for (const hub of base.hubs) {
+    for (let band = 0; band <= 3; band += 1) {
+      const list = [...(groups.get(`${hub.peerId}:${band}`) ?? [])].sort((a, b) => {
+        const byDate = a.created_at.localeCompare(b.created_at)
+        if (byDate !== 0) return byDate
+        return a.id.localeCompare(b.id)
+      })
+      list.forEach((conclusion, index) => {
+        const distance = radiusBandCenter(band) + ((index % 3) - 1) * 6
+        const angle = index * GOLDEN_ANGLE
+        dots.push({
+          conclusion,
+          peerId: hub.peerId,
+          x: clamp(hub.x + distance * Math.cos(angle), 8, width - 8),
+          y: clamp(hub.y + distance * Math.sin(angle), 8, height - 8),
+          r: dotRadius(conclusion.times_derived, small),
+          color: LEVEL_COLORS[conclusion.level],
+          depth: depthById.get(conclusion.id) ?? 0,
+          band,
+        })
+      })
+    }
+  }
+  return { hubs: base.hubs, dots, cells: [], aggregated: false, total: base.total }
 }
 
 export interface NetworkEdge {

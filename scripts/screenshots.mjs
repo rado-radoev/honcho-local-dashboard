@@ -134,6 +134,26 @@ const DEMO_VIEWS = [
     },
   },
   {
+    // Reasoning Radius (Phase E): same still-mode determinism —
+    // spiral slots/depths are pure functions of the fixture data.
+    file: 'memory-map-radius.png',
+    hash: '#/memory-map/hermes',
+    interact: async (page) => {
+      await page.getByRole('button', { name: 'Radius', exact: true }).click()
+      await page.getByTestId('radius-ring-label').first().waitFor()
+      const dots = await page.getByTestId('map-dot').count()
+      if (dots !== 120) throw new Error(`memory map radius: expected 120 conclusion dots, got ${dots}`)
+      const labels = await page.evaluate(() =>
+        [...document.querySelectorAll('[data-testid="radius-ring-label"]')].map((el) => el.textContent),
+      )
+      for (const expected of ['Said', 'Derived ×1', 'Derived ×2', 'Derived ×3+']) {
+        if (!labels.includes(expected)) throw new Error(`memory map radius: missing ring label ${expected}`)
+      }
+      const ticks = await page.getByTestId('month-rim-tick').count()
+      if (ticks < 3) throw new Error(`memory map radius: expected month rim ticks, got ${ticks}`)
+    },
+  },
+  {
     file: 'conclusions.png',
     hash: '#/conclusions/hermes',
     interact: async (page) => {

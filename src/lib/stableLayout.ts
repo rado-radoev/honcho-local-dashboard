@@ -76,6 +76,97 @@ function byAgeThenId(a: Conclusion, b: Conclusion): number {
   return a.id.localeCompare(b.id)
 }
 
+// ---------------------------------------------------------------------------
+// Reasoning Radius slots (Phase E): the SAME append-stable rule, applied
+// per (peer, depth-band) group instead of per peer. A radius dot's slot
+// is its angle around the hub plus a small sub-ring offset inside its
+// band (bands are ~22px wide; three sub-rings at -6/0/+6px keep a busy
+// band from stacking every dot on one circle). A conclusion keeps its
+// slot for as long as it stays in the same (peer, band) group; only
+// genuinely new conclusions in a group get fresh indices for that
+// group, past a per-group high-water mark. Bands come from
+// lib/derivationDepth.ts (depth capped at the 3+ display band), so the
+// group key IS the displayed depth: (peer, capped depth).
+
+export interface RadiusSlot {
+  peerId: string
+  band: number
+  index: number
+  angle: number
+  // Offset in px from the band's centre radius (-6, 0 or +6).
+  subRadius: number
+}
+
+export interface RadiusStableLayoutState {
+  slots: ReadonlyMap<string, RadiusSlot>
+  nextIndexByGroup: ReadonlyMap<string, number>
+}
+
+export const EMPTY_RADIUS_STABLE_LAYOUT: RadiusStableLayoutState = {
+  slots: new Map(),
+  nextIndexByGroup: new Map(),
+}
+
+export function radiusSlot(peerId: string, band: number, index: number): RadiusSlot {
+  return {
+    peerId,
+    band,
+    index,
+    angle: index * GOLDEN_ANGLE,
+    subRadius: ((index % 3) - 1) * 6,
+  }
+}
+
+function radiusGroupKey(peerId: string, band: number): string {
+  return `${peerId}:${band}`
+}
+
+export function advanceRadiusStableLayout(
+  state: RadiusStableLayoutState,
+  conclusions: Conclusion[],
+  bandById: ReadonlyMap<string, number>,
+): RadiusStableLayoutState {
+  const unique = dedupe(conclusions)
+  const slots = new Map<string, RadiusSlot>()
+  const freshByGroup = new Map<string, Conclusion[]>()
+
+  for (const item of unique) {
+    const band = bandById.get(item.id) ?? 0
+    const previous = state.slots.get(item.id)
+    if (previous && previous.peerId === item.observed_id && previous.band === band) {
+      slots.set(item.id, previous)
+      continue
+    }
+    const key = radiusGroupKey(item.observed_id, band)
+    const list = freshByGroup.get(key) ?? []
+    list.push(item)
+    freshByGroup.set(key, list)
+  }
+
+  if (freshByGroup.size === 0 && slots.size === state.slots.size) {
+    return state
+  }
+
+  const nextIndexByGroup = new Map(state.nextIndexByGroup)
+  for (const [key, list] of freshByGroup) {
+    list.sort(byAgeThenId)
+    let next = nextIndexByGroup.get(key) ?? 0
+    for (const slot of slots.values()) {
+      if (radiusGroupKey(slot.peerId, slot.band) === key && slot.index >= next) {
+        next = slot.index + 1
+      }
+    }
+    for (const item of list) {
+      const band = bandById.get(item.id) ?? 0
+      slots.set(item.id, radiusSlot(item.observed_id, band, next))
+      next += 1
+    }
+    nextIndexByGroup.set(key, next)
+  }
+
+  return { slots, nextIndexByGroup }
+}
+
 export function advanceStableLayout(
   state: StableLayoutState,
   conclusions: Conclusion[],

@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "screenshots": "node scripts/screenshots.mjs",
-    "test:playground": "node scripts/playground-test.mjs"
+    "test:playground": "node scripts/playground-test.mjs",
+    "test:radius": "node scripts/memory-map-radius-test.mjs"
   },
   "dependencies": {
     "@fontsource/silkscreen": "^5.3.0",
