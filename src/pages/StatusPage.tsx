@@ -4,10 +4,12 @@ import { useAsyncData } from '../lib/useAsyncData'
 import { PageHeader } from '../components/ui'
 
 // Instance Status, mirroring the cloud page of the same name ("Monitor your
-// system status"): green checks for the API machine, the Honcho version,
-// and — the locally available extra — the deriver queue per workspace.
-// The cloud page's "Deriver Machine" row has no direct local API signal;
-// queue work-units are the closest verified local equivalent.
+// system status"): green checks for the API machine and the deriver
+// machine, the Honcho version, and — the locally available extra — the
+// deriver queue per workspace. There is no dedicated deriver health
+// endpoint locally, so the Deriver Machine row is derived from the
+// verified queue/status endpoint: if it responds for a workspace, the
+// deriver side of the instance is answering, so the row reads Active.
 export function StatusPage() {
   const { api, health, refreshHealth } = useConnection()
 
@@ -44,6 +46,11 @@ export function StatusPage() {
           </span>
         </div>
 
+        <DeriverMachineRow
+          firstWorkspaceId={workspaces.data?.items[0]?.id ?? null}
+          workspacesLoaded={workspaces.data !== null}
+        />
+
         {version.data ? (
           <div className="flex items-center gap-3">
             <Server className="h-5 w-5 text-blue-400" />
@@ -71,6 +78,48 @@ export function StatusPage() {
           </div>
         </section>
       ) : null}
+    </div>
+  )
+}
+
+// The cloud status page's "Deriver Machine" row. Locally the honest signal
+// is the queue/status endpoint (it reports the deriver's work units): a
+// successful response for the first workspace means Active; an error means
+// Unreachable; while the probe is in flight the row reads Checking.
+function DeriverMachineRow({
+  firstWorkspaceId,
+  workspacesLoaded,
+}: {
+  firstWorkspaceId: string | null
+  workspacesLoaded: boolean
+}) {
+  const { api } = useConnection()
+  const { data, error, loading } = useAsyncData(
+    async () => {
+      if (!api || !firstWorkspaceId) return null
+      return api.getQueueStatus(firstWorkspaceId)
+    },
+    [api, firstWorkspaceId],
+  )
+
+  let label = 'Checking…'
+  let labelClass = 'font-semibold text-fog'
+  let icon = <Server className="h-5 w-5 text-fog" />
+  if (data) {
+    label = 'Active'
+    labelClass = 'font-semibold text-green-500'
+    icon = <CheckCircle2 className="h-5 w-5 text-green-500" />
+  } else if (error || (workspacesLoaded && !loading && !firstWorkspaceId)) {
+    label = 'Unreachable'
+    labelClass = 'font-semibold text-red-500'
+    icon = <XCircle className="h-5 w-5 text-red-500" />
+  }
+
+  return (
+    <div className="flex items-center gap-3">
+      {icon}
+      <span className="text-mist">Deriver Machine</span>
+      <span className={labelClass}>{label}</span>
     </div>
   )
 }

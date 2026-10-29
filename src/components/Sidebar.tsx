@@ -81,7 +81,7 @@ export function Sidebar({
   onDisconnect: () => void
 }) {
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-line bg-ink-deep">
+    <aside className="flex w-64 shrink-0 flex-col border-r border-line bg-ink-deep">
       <div className="px-5 pb-2 pt-6">
         {/* Our own text wordmark — not the cloud logo asset. */}
         <div className="text-xl font-bold tracking-widest text-mist">HONCHO</div>
@@ -115,7 +115,7 @@ export function Sidebar({
                 <span className={`ml-auto h-2 w-2 rounded-full ${healthDotClass(health)}`} />
               ) : null}
               {item.cloudOnly ? (
-                <span className="ml-auto rounded border border-line px-1 text-[9px] tracking-normal text-fog">
+                <span className="ml-auto shrink-0 rounded border border-line px-1 text-[8px] tracking-normal text-fog">
                   CLOUD
                 </span>
               ) : null}

@@ -76,6 +76,34 @@ const DEMO_VIEWS = [
   { file: 'status.png', hash: '#/status' },
 ]
 
+// Before each capture, freeze everything that can render differently
+// between two runs of the same page:
+// - blur the focused element + hide text carets (a blinking caret in a
+//   filled input renders in ~half the frames — the original peer-chat /
+//   peer-search instability),
+// - disable CSS animations/transitions (spinner frames, fade-ins),
+// - hide scrollbars (thumb size/position tracks async content height),
+// - wait for webfonts so text antialiasing is final.
+// Together these make consecutive runs byte-identical.
+const FREEZE_CSS = `
+  * {
+    caret-color: transparent !important;
+    animation: none !important;
+    transition: none !important;
+  }
+  ::-webkit-scrollbar { width: 0 !important; height: 0 !important; }
+`
+
+async function settleForCapture(page) {
+  await page.addStyleTag({ content: FREEZE_CSS }).catch(() => {})
+  await page.evaluate(async () => {
+    const active = document.activeElement
+    if (active instanceof HTMLElement) active.blur()
+    await document.fonts.ready
+  })
+  await page.waitForTimeout(60)
+}
+
 async function waitForPreviewServer() {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     try {
@@ -103,25 +131,34 @@ async function main() {
     const browser = await chromium.launch()
 
     // 1. The connect screen, in a pristine browser profile.
-    const connectContext = await browser.newContext({ viewport: VIEWPORT })
+    const connectContext = await browser.newContext({ viewport: VIEWPORT, reducedMotion: 'reduce' })
     const connectPage = await connectContext.newPage()
     connectPage.on('pageerror', (error) => pageErrors.push(`connect: ${error.message}`))
     await connectPage.goto(ORIGIN, { waitUntil: 'networkidle' })
     await connectPage.getByText('Connect to your self-hosted Honcho instance').waitFor()
+    await settleForCapture(connectPage)
     await connectPage.screenshot({ path: `${OUTPUT_DIR}connect.png` })
     console.log('captured connect.png')
     await connectContext.close()
 
     // 2. Every app view in demo mode (?demo=1 selects the fixture client).
-    const demoContext = await browser.newContext({ viewport: VIEWPORT })
+    const demoContext = await browser.newContext({ viewport: VIEWPORT, reducedMotion: 'reduce' })
     const page = await demoContext.newPage()
     page.on('pageerror', (error) => pageErrors.push(`${error.message}`))
 
     for (const view of DEMO_VIEWS) {
       await page.goto(`${ORIGIN}/?demo=1${view.hash}`, { waitUntil: 'networkidle' })
+      // Full reload before capturing: hash-only navigation keeps the SPA
+      // mounted, and a previous view's screenshot leaves Chromium's
+      // compositor in one of two raster states — rounded-corner
+      // antialiasing then flips between runs (the peer-card / peer-chat /
+      // peer-search instability). A fresh document renders canonically.
+      // Interactions run AFTER the reload so their results are in frame.
+      await page.reload({ waitUntil: 'networkidle' })
       if (view.interact) await view.interact(page)
       // Let async fixture data settle before capturing.
       await page.waitForTimeout(250)
+      await settleForCapture(page)
       await page.screenshot({ path: `${OUTPUT_DIR}${view.file}` })
       console.log(`captured ${view.file}`)
     }

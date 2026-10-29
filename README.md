@@ -61,22 +61,32 @@ Honcho's official dashboard screenshots, plus a small `hermes` workspace.
 
 The Honcho API does not reliably emit CORS headers for browser apps, so
 calling it directly from a page served on another origin can be blocked by
-the browser. This project handles that in development:
+the browser. This project handles that locally with Vite's proxy
+(`/honcho-api` → `VITE_HONCHO_TARGET`, default `http://localhost:8000`),
+used **when the server you connect to is the proxy target**. Copy
+`.env.example` to `.env` and set `VITE_HONCHO_TARGET` if your server lives
+elsewhere, then connect using that same URL. Whether a given build may use
+the proxy is decided by its Vite mode (`shouldUseProxy` in
+`src/api/client.ts`):
 
-- In `npm run dev` (and `npm run preview`), requests to the configured
-  server go through Vite's proxy (`/honcho-api` → `VITE_HONCHO_TARGET`,
-  default `http://localhost:8000`) **when the server you connect to is the
-  proxy target**. Copy `.env.example` to `.env` and set `VITE_HONCHO_TARGET`
-  if your server lives elsewhere, then connect using that same URL.
+- **Dev** (`npm run dev`, mode `development`): the dev server proxies
+  `/honcho-api`, and the client uses it.
+- **Preview** (`npm run build:preview && npm run preview`, mode
+  `preview`): `vite preview` also proxies `/honcho-api` (see
+  `preview.proxy` in `vite.config.ts`), and the preview build has the
+  proxy flag baked in, so it uses it too. Build with `build:preview` —
+  serving a plain production build under `vite preview` will *not* use
+  the proxy and the browser will block the direct calls (CORS).
 - Connecting to any other URL uses a direct fetch, which works only if that
   server allows CORS from the dashboard's origin.
 
-**Production:** serve the built dashboard (`npm run build` → `dist/`) from
-the **same origin** as the Honcho API, or put both behind a reverse proxy
-that forwards `/honcho-api`-style traffic — same-origin requests have no
-CORS problem at all. Don't expose a no-auth Honcho server to the public
-internet just to make CORS go away; put the dashboard on your LAN/Tailscale
-like the server itself.
+**Production:** `npm run build` (mode `production`) never uses the proxy —
+a static deployment has no `/honcho-api` endpoint. Serve the built
+dashboard (`dist/`) from the **same origin** as the Honcho API, or put
+both behind a reverse proxy — same-origin requests have no CORS problem
+at all. Don't expose a no-auth Honcho server to the public internet just
+to make CORS go away; put the dashboard on your LAN/Tailscale like the
+server itself.
 
 ## Endpoints used (Honcho v3 API)
 
@@ -110,6 +120,7 @@ plastic-labs/honcho (main branch):
 npm run dev          # dev server with the /honcho-api proxy
 npm test             # vitest: API client unit tests (mocked fetch)
 npm run build        # type-check + production build into dist/
+npm run build:preview && npm run preview  # local preview build (proxy on)
 npm run screenshots  # see below
 ```
 

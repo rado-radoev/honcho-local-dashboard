@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import type { HonchoApi } from '../api/honchoApi'
-import { HonchoClient } from '../api/client'
+import { HonchoClient, shouldUseProxy } from '../api/client'
 import { DemoHonchoApi } from '../api/demoClient'
 
 // Connection settings are persisted in localStorage so a refresh keeps the
@@ -73,7 +73,9 @@ function createApi(saved: SavedConnection): HonchoApi {
     baseUrl: saved.baseUrl,
     token: saved.token || undefined,
     proxyTarget: import.meta.env.VITE_HONCHO_TARGET || undefined,
-    useProxy: import.meta.env.DEV,
+    // MODE, not DEV: a preview build is a production bundle (DEV=false)
+    // served by `vite preview`, which does provide the /honcho-api proxy.
+    useProxy: shouldUseProxy(import.meta.env.MODE),
   })
 }
 

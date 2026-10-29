@@ -29,10 +29,14 @@ export interface HonchoClientOptions {
   baseUrl: string
   // Optional JWT / API token. Sent as `Authorization: Bearer <token>`.
   token?: string
-  // The server the Vite dev proxy forwards /honcho-api to. Only used to
+  // The server the Vite proxy forwards /honcho-api to. Only used to
   // decide whether requests for `baseUrl` can ride the proxy (see below).
   proxyTarget?: string
-  // True in `vite dev` / `vite preview`, where the /honcho-api proxy exists.
+  // True when this bundle is served by a Vite server that provides the
+  // /honcho-api proxy — the dev server or a preview build. Decide it with
+  // shouldUseProxy(import.meta.env.MODE), not import.meta.env.DEV: DEV is
+  // false for the production bundle that `vite preview` serves, which used
+  // to make preview builds bypass the proxy and die on CORS.
   useProxy?: boolean
   fetchFn?: typeof fetch
 }
@@ -40,13 +44,28 @@ export interface HonchoClientOptions {
 export const PROXY_PREFIX = '/honcho-api'
 export const DEFAULT_PROXY_TARGET = 'http://localhost:8000'
 
+// Which Vite mode this bundle was built/served for decides whether the
+// /honcho-api proxy may be used:
+// - "development" (`npm run dev`): the dev server proxies /honcho-api.
+// - "preview" (`npm run build:preview`, served by `npm run preview`): the
+//   preview server also proxies /honcho-api (preview.proxy in
+//   vite.config.ts), so the flag is baked into that build on purpose.
+// - "production" (`npm run build`): NO proxy — a real deployment is served
+//   as static files with no /honcho-api endpoint, so requests must go
+//   directly to the configured server (same-origin or reverse-proxied
+//   deployments have no CORS problem to sidestep).
+export function shouldUseProxy(mode: string): boolean {
+  return mode === 'development' || mode === 'preview'
+}
+
 function stripTrailingSlash(url: string): string {
   return url.replace(/\/+$/, '')
 }
 
 // Decides where requests actually go.
-// - In dev, when the configured server IS the proxy target, requests go to
-//   the same-origin proxy prefix instead, sidestepping CORS entirely.
+// - When the bundle may use the proxy (dev / preview builds — see
+//   shouldUseProxy) and the configured server IS the proxy target, requests
+//   go to the same-origin proxy prefix instead, sidestepping CORS entirely.
 // - Everywhere else the configured base URL is used directly (production
 //   deployments are expected to serve the dashboard same-origin with the
 //   API or behind a reverse proxy — see README).

@@ -17,10 +17,10 @@ export function formatDateTime(isoString: string): string {
   return dateTimeFormatter.format(date)
 }
 
-// Metadata / configuration cells in the cloud tables show "None" for empty
+// Metadata / configuration cells in the cloud tables show "{}" for empty
 // objects and the raw JSON otherwise.
 export function formatJsonCell(value: Record<string, unknown>): string {
-  if (!value || Object.keys(value).length === 0) return 'None'
+  if (!value || Object.keys(value).length === 0) return '{}'
   return JSON.stringify(value)
 }
 

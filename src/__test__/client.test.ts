@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { HonchoClient, HonchoError, resolveRequestBase } from '../api/client'
+import { HonchoClient, HonchoError, resolveRequestBase, shouldUseProxy } from '../api/client'
 
 // Tests for the Honcho API client: URL building (including the dev-proxy
 // rule), the auth header, error handling, and request shapes for the
@@ -50,6 +50,46 @@ describe('resolveRequestBase', () => {
       baseUrl: 'http://localhost:8000',
       proxyTarget: 'http://localhost:8000',
       useProxy: false,
+    })
+    expect(base).toBe('http://localhost:8000')
+  })
+})
+
+describe('shouldUseProxy', () => {
+  it('is true for the dev server (mode "development")', () => {
+    expect(shouldUseProxy('development')).toBe(true)
+  })
+
+  // Regression test for the preview bug: a preview build is a production
+  // bundle (import.meta.env.DEV === false) served by `vite preview`, which
+  // DOES provide the /honcho-api proxy. Basing useProxy on DEV made
+  // preview builds call the Honcho server directly and fail on CORS.
+  it('is true for a preview-served build (mode "preview")', () => {
+    expect(shouldUseProxy('preview')).toBe(true)
+  })
+
+  it('is false for a production build (mode "production")', () => {
+    expect(shouldUseProxy('production')).toBe(false)
+  })
+
+  it('is false for any other mode', () => {
+    expect(shouldUseProxy('test')).toBe(false)
+  })
+
+  it('routes a preview-served build through the proxy when the server is the target', () => {
+    const base = resolveRequestBase({
+      baseUrl: 'http://localhost:8000',
+      proxyTarget: 'http://localhost:8000',
+      useProxy: shouldUseProxy('preview'),
+    })
+    expect(base).toBe('/honcho-api')
+  })
+
+  it('keeps a production build off the proxy even when the server is the target', () => {
+    const base = resolveRequestBase({
+      baseUrl: 'http://localhost:8000',
+      proxyTarget: 'http://localhost:8000',
+      useProxy: shouldUseProxy('production'),
     })
     expect(base).toBe('http://localhost:8000')
   })
