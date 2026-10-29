@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import type { HonchoApi } from '../api/honchoApi'
-import { HonchoClient, shouldUseProxy } from '../api/client'
+import { HonchoClient, formatHealthError, shouldUseProxy } from '../api/client'
 import { DemoHonchoApi } from '../api/demoClient'
 
 // Connection settings are persisted in localStorage so a refresh keeps the
@@ -32,6 +32,10 @@ interface ConnectionContextValue {
   api: HonchoApi | null
   mode: ConnectionMode | null
   baseUrl: string
+  // Route requests actually take (proxy vs direct, exact URL) — null when
+  // no connection is active. Surfaced on the Get Started page so even a
+  // working connection documents its path.
+  routeDescription: string | null
   health: HealthState
   healthError: string | null
   connect: (baseUrl: string, token: string) => Promise<void>
@@ -81,12 +85,15 @@ function createApi(saved: SavedConnection): HonchoApi {
 
 export function ConnectionProvider({ children }: { children: ReactNode }) {
   const [saved, setSaved] = useState<SavedConnection | null>(null)
+  const [routeDescription, setRouteDescription] = useState<string | null>(null)
   const [health, setHealth] = useState<HealthState>('unknown')
   const [healthError, setHealthError] = useState<string | null>(null)
   const apiRef = useRef<HonchoApi | null>(null)
 
   const applyConnection = useCallback((next: SavedConnection | null) => {
-    apiRef.current = next === null ? null : createApi(next)
+    const api = next === null ? null : createApi(next)
+    apiRef.current = api
+    setRouteDescription(api?.routeDescription() ?? null)
     setSaved(next)
     saveConnection(next)
     setHealth(next === null ? 'unknown' : 'checking')
@@ -104,11 +111,12 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
         setHealthError(null)
       } else {
         setHealth('failed')
-        setHealthError(`Unexpected health response: ${JSON.stringify(result)}`)
+        const unexpected = new Error(`Unexpected health response: ${JSON.stringify(result)}`)
+        setHealthError(formatHealthError(unexpected, api))
       }
     } catch (error) {
       setHealth('failed')
-      setHealthError(error instanceof Error ? error.message : 'Health check failed')
+      setHealthError(formatHealthError(error, api))
     }
   }, [])
 
@@ -150,6 +158,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
       api: saved === null ? null : apiRef.current,
       mode: saved?.mode ?? null,
       baseUrl: saved?.baseUrl ?? DEFAULT_BASE_URL,
+      routeDescription,
       health,
       healthError,
       connect,
@@ -157,7 +166,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
       disconnect,
       refreshHealth,
     }),
-    [saved, health, healthError, connect, startDemo, disconnect, refreshHealth],
+    [saved, routeDescription, health, healthError, connect, startDemo, disconnect, refreshHealth],
   )
 
   return <ConnectionContext.Provider value={value}>{children}</ConnectionContext.Provider>

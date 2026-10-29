@@ -24,6 +24,14 @@ export class HonchoError extends Error {
   }
 }
 
+// Health-failure message with the tried route appended, so the Connect
+// screen and the in-app banner say exactly what was attempted (proxy vs
+// direct, which URL) instead of a bare "could not reach the server".
+export function formatHealthError(error: unknown, api: HonchoApi): string {
+  const message = error instanceof Error ? error.message : 'Health check failed'
+  return `${message} — tried: ${api.routeDescription()}`
+}
+
 export interface HonchoClientOptions {
   // The Honcho server the user wants to talk to, e.g. http://localhost:8000
   baseUrl: string
@@ -136,14 +144,31 @@ function describeErrorBody(body: unknown, fallback: string): string {
 
 export class HonchoClient implements HonchoApi {
   private readonly requestBase: string
+  private readonly configuredServer: string
+  private readonly useProxy: boolean
   private readonly token?: string
   private readonly fetchFn: typeof fetch
 
   constructor(options: HonchoClientOptions) {
     this.requestBase = resolveRequestBase(options)
+    this.configuredServer = stripTrailingSlash(options.baseUrl)
+    this.useProxy = options.useProxy ?? false
     this.token = options.token
     // Native browser fetch requires the global receiver, not this client.
     this.fetchFn = options.fetchFn ?? globalThis.fetch.bind(globalThis)
+  }
+
+  // Diagnostics: describes the route a request actually takes, so a failed
+  // health check can say exactly what was tried instead of a bare
+  // "could not reach the server". `path` defaults to the health endpoint,
+  // which is the request connection checks make.
+  routeDescription(method: 'GET' | 'POST' = 'GET', path = '/health'): string {
+    const url = `${this.requestBase}${path}`
+    if (this.requestBase === PROXY_PREFIX) {
+      return `${method} ${url} (via Vite proxy — useProxy on, configured server ${this.configuredServer})`
+    }
+    const proxyState = this.useProxy ? 'on' : 'off'
+    return `${method} ${url} (direct, no proxy — useProxy ${proxyState})`
   }
 
   private async request<T>(
