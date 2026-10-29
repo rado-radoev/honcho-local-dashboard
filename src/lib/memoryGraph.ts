@@ -212,17 +212,31 @@ export function layoutNetwork(
   const hubByPeer = new Map(hubs.map((hub) => [hub.peerId, hub]))
   const rawEdges = aggregateEdges(conclusions)
   const maxCount = Math.max(1, ...rawEdges.map((edge) => edge.count))
+  const pairKeys = new Set(rawEdges.map((edge) => `${edge.observer}→${edge.observed}`))
   const edges = rawEdges
     .filter((edge) => hubByPeer.has(edge.observer) && hubByPeer.has(edge.observed))
     .map((edge) => {
       const from = hubByPeer.get(edge.observer)!
       const to = hubByPeer.get(edge.observed)!
+      // Bidirectional pairs share one straight line; offset each
+      // direction perpendicular by 7px so both stay visible/clickable.
+      let offsetX = 0
+      let offsetY = 0
+      const hasReverse = pairKeys.has(`${edge.observed}→${edge.observer}`)
+      if (hasReverse && edge.observer !== edge.observed) {
+        const dx = to.x - from.x
+        const dy = to.y - from.y
+        const length = Math.max(1, Math.hypot(dx, dy))
+        const side = edge.observer < edge.observed ? 1 : -1
+        offsetX = (-dy / length) * 7 * side
+        offsetY = (dx / length) * 7 * side
+      }
       return {
         edge,
-        x1: from.x,
-        y1: from.y,
-        x2: to.x,
-        y2: to.y,
+        x1: from.x + offsetX,
+        y1: from.y + offsetY,
+        x2: to.x + offsetX,
+        y2: to.y + offsetY,
         width: 1 + 5 * (edge.count / maxCount),
         color: LEVEL_COLORS[edge.dominantLevel],
       }

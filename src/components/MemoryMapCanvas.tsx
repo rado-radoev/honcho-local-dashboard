@@ -146,7 +146,7 @@ export function NetworkSvg({
       data-testid="network-svg"
     >
       <defs>
-        <marker id="edge-arrow" viewBox="0 0 10 10" refX={9} refY={5} markerWidth={6} markerHeight={6} orient="auto-start-reverse">
+        <marker id="edge-arrow" viewBox="0 0 10 10" refX={9} refY={5} markerWidth={9} markerHeight={9} markerUnits="userSpaceOnUse" orient="auto-start-reverse">
           <path d="M 0 0 L 10 5 L 0 10 z" fill="#9FB0CC" />
         </marker>
         <linearGradient id="hub-ring-net" x1="0" y1="0" x2="1" y2="1">

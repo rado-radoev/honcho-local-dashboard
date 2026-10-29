@@ -34,7 +34,8 @@ export function buildGrowthSeries(conclusions: Conclusion[], weeks = 26): Growth
     const boundary = start + (week + 1) * WEEK_MS
     let count = 0
     for (const at of sorted) {
-      if (at < boundary) count += 1
+      // <= so the final week includes the newest conclusion itself.
+      if (at <= boundary) count += 1
     }
     points.push({ label: `W${week + 1}`, value: count })
   }

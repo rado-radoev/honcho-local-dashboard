@@ -133,7 +133,7 @@ export function ConclusionsPage({
           </button>
         ))}
         {capped.data ? (
-          <span className="ml-2 text-xs text-fog">{cappedLabel(capped.data)} conclusions</span>
+          <span className="ml-2 text-xs text-fog">{cappedLabel(capped.data)}</span>
         ) : null}
       </div>
 

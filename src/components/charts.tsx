@@ -1,32 +1,10 @@
-import { useEffect, useState } from 'react'
 import type { GrowthPoint, HeatmapData } from '../lib/charts'
 
 // Shared chart components (Overview hub + Memory Map rail). SVG only,
 // every chart carries a legend/unit label per the design law. The accent
 // gradient is used for chart strokes only.
 
-export function useCountUp(target: number, durationMs = 400): number {
-  const [value, setValue] = useState(() => {
-    if (typeof window === 'undefined') return target
-    return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? target : 0
-  })
-  useEffect(() => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      setValue(target)
-      return
-    }
-    let frame = 0
-    const started = performance.now()
-    function tick(now: number) {
-      const progress = Math.min(1, (now - started) / durationMs)
-      setValue(Math.round(target * progress))
-      if (progress < 1) frame = requestAnimationFrame(tick)
-    }
-    frame = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(frame)
-  }, [target, durationMs])
-  return value
-}
+import { useCountUp } from '../lib/useCountUp'
 
 export function CountUp({ value }: { value: number }) {
   const display = useCountUp(value)

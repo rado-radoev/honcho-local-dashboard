@@ -1,22 +1,11 @@
 import { useState } from 'react'
 import { Download } from 'lucide-react'
 import { useConnection } from '../state/connection'
-import type { Conclusion } from '../types'
+import { peerExportToMarkdown, type PeerExportData } from '../lib/peerExport'
 
 // Peer export: peer card + representation + conclusions (capped set,
 // observed = this peer) downloaded as JSON or Markdown. Generated
 // entirely client-side from data the dashboard already fetches.
-
-interface PeerExportData {
-  peer: string
-  workspace: string
-  exportedFrom: string
-  card: string[] | null
-  representation: string
-  conclusions: Conclusion[]
-  conclusionsTotal: number
-  conclusionsCapped: boolean
-}
 
 function download(filename: string, mime: string, text: string): void {
   const blob = new Blob([text], { type: mime })
@@ -26,24 +15,6 @@ function download(filename: string, mime: string, text: string): void {
   anchor.download = filename
   anchor.click()
   URL.revokeObjectURL(url)
-}
-
-export function toMarkdown(data: PeerExportData): string {
-  const lines: string[] = [`# Peer: ${data.peer}`, '', `Workspace: ${data.workspace}`, '']
-  lines.push('## Peer Card')
-  if (data.card && data.card.length > 0) {
-    for (const fact of data.card) lines.push(`- ${fact}`)
-  } else {
-    lines.push('(no card)')
-  }
-  lines.push('', '## Representation', '', data.representation || '(none)', '')
-  lines.push(`## Conclusions (${data.conclusions.length} of ${data.conclusionsTotal})`)
-  for (const conclusion of data.conclusions) {
-    lines.push(
-      `- [${conclusion.level}] ${conclusion.content} — ${conclusion.observer_id} → ${conclusion.observed_id}, ${conclusion.created_at}`,
-    )
-  }
-  return lines.join('\n')
 }
 
 export function PeerExportButtons({
@@ -85,7 +56,7 @@ export function PeerExportButtons({
       if (format === 'json') {
         download(`peer-${peerId}.json`, 'application/json', JSON.stringify(data, null, 2))
       } else {
-        download(`peer-${peerId}.md`, 'text/markdown', toMarkdown(data))
+        download(`peer-${peerId}.md`, 'text/markdown', peerExportToMarkdown(data))
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Export failed')

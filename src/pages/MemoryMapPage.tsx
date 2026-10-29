@@ -125,7 +125,7 @@ export function MemoryMapPage({ workspaceId }: { workspaceId: string | null }) {
         ))}
         {capped.data ? (
           <span className="ml-2 text-xs text-fog">
-            showing {visible.length} of {cappedLabel(capped.data)} conclusions
+            showing {visible.length} · {cappedLabel(capped.data)}
           </span>
         ) : null}
       </div>

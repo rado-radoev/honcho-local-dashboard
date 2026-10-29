@@ -73,6 +73,50 @@ const DEMO_VIEWS = [
     },
   },
   { file: 'session-peers.png', hash: '#/workspace/test-1/sessions/groupchat_1?tab=peers' },
+  {
+    file: 'memory-map.png',
+    hash: '#/memory-map/hermes',
+    interact: async (page) => {
+      await page.getByTestId('map-dot').first().waitFor()
+      const dots = await page.getByTestId('map-dot').count()
+      if (dots < 50) throw new Error(`memory map: expected >= 50 conclusion dots, got ${dots}`)
+      const hubs = await page.locator('[data-testid="constellation-svg"] text').count()
+      if (hubs < 3) throw new Error(`memory map: expected peer hub labels, got ${hubs}`)
+    },
+  },
+  {
+    file: 'memory-map-network.png',
+    hash: '#/memory-map/hermes',
+    interact: async (page) => {
+      await page.getByRole('button', { name: 'Network', exact: true }).click()
+      await page.getByTestId('network-svg').waitFor()
+    },
+  },
+  {
+    file: 'conclusions.png',
+    hash: '#/conclusions/hermes',
+    interact: async (page) => {
+      await page.getByText('Radoslav prefers short, direct, evidence-backed answers.').first().waitFor()
+    },
+  },
+  {
+    file: 'workspace-chat.png',
+    hash: '#/workspace/test-1',
+    interact: async (page) => {
+      await page.getByRole('tab', { name: 'Workspace Chat' }).click()
+      await page.getByPlaceholder('Ask about workspace test-1…').fill('What does Alice like?')
+      await page.getByRole('button', { name: 'Ask', exact: true }).click()
+      await page.getByText('EVIDENCE — WHAT THE AGENT READ').waitFor()
+    },
+  },
+  {
+    file: 'workspace-scopes.png',
+    hash: '#/workspace/hermes',
+    interact: async (page) => {
+      await page.getByRole('tab', { name: 'Scopes' }).click()
+      await page.getByText('personal-memory').waitFor()
+    },
+  },
   { file: 'status.png', hash: '#/status' },
   { file: 'performance.png', hash: '#/performance' },
   { file: 'playground.png', hash: '#/playground' },
